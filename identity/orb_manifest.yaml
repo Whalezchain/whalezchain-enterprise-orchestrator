@@ -1,0 +1,18 @@
+# Whalez‑AI orb manifest (conceptual, non-secret)
+orb_manifest_version: 1
+
+orb:
+  id: "orb://whalez/core"
+  name: "Whalez-AI"
+  role: "sovereign_ai_firm"
+  governed_by: "founder_council_key"
+
+founder_genesis:
+  # This is *documentation only*. Real secrets live in an offline hardwallet.
+  wallet_namespace: "whalezchain://genesis/founder"
+  hardwallet_boot_strategy: "one_time_qr_then_offline"
+  notes: >
+    The first time the hardwallet is activated, it mints the Whalezchain
+    founder, treasury, and ledger wallets. After that, the same physical
+    wallet is used only for signing governance operations, never minting
+    again.
