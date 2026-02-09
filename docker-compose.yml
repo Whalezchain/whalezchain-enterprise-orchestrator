@@ -1,1 +1,21 @@
-version: '3.8'
+version: "3.8"
+
+services:
+  orchestrator:
+    build:
+      context: ./apps/orchestrator
+      dockerfile: Dockerfile
+    container_name: whalezchain-orchestrator
+    restart: unless-stopped
+    env_file:
+      - .env.example
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - whalez-net
+
+networks:
+  whalez-net:
+    driver: bridge
