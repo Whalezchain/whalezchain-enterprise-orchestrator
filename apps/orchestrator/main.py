@@ -1,17 +1,25 @@
 import os
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from pydantic import BaseSettings
+
 from dotenv import load_dotenv
+from fastapi import FastAPI
+
+from apps.orchestrator.api import router as v1_router
+
 load_dotenv()
-class Settings(BaseSettings):
-    APP_NAME: str = "Whalezchain Orchestrator"
-    ENV: str = "development"
-    PORT: int = 8080
-    class Config:
-        env_file = ".env"
-settings = Settings()
-app = FastAPI(title=settings.APP_NAME)
-@app.get('/health')
-def health():
-    return {'status':'ok'}
+
+APP_NAME = os.getenv("APP_NAME", "Whalezchain Orchestrator")
+ENV = os.getenv("ENV", "development")
+PORT = int(os.getenv("PORT", "8080"))
+
+app = FastAPI(title=APP_NAME, version="1.0.0")
+app.include_router(v1_router)
+
+
+@app.get("/health")
+def health() -> dict[str, object]:
+    return {
+        "service": "whalezchain-enterprise-orchestrator",
+        "status": "ok",
+        "environment": ENV,
+        "port": PORT,
+    }
