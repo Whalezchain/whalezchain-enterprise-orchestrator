@@ -1,9 +1,5 @@
-This directory contains the front‑end applications for Whalez‑AI.
+This directory contains application placeholders for the Whalez‑AI ecosystem.
 
-* `whalezchain-web` – public exchange and ecosystem portal (placeholder).
-* `deltaalpha-tradepro` – public trading and banking interface (placeholder).
-* `founder-console` – private management console for founders (placeholder).
-* `workbench` – private system operator console (placeholder).
+Public application implementations are maintained in their respective repositories. Internal operational tooling is intentionally kept outside the public application surface.
 
-Each subdirectory should include the source code and deployment configuration for
-its respective app.
+Each application directory here is only a placeholder for source ownership and deployment coordination.
