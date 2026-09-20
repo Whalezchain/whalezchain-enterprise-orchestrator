@@ -21,7 +21,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/whalez-orchestrator:latest ./apps/orchestrator
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/whalez-orchestrator:latest ./apps/whalezchain_orchestrator
 
       - name: Push Docker image
         run: |

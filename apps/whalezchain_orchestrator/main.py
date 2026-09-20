@@ -1,0 +1,77 @@
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from .bootstrap import initialize_runtime
+from .models import (
+    TestnetTransferRequest,
+    TestnetTransferResponse,
+)
+from .services.execution_service import execute
+from .asset_authority import asset_authority
+from .asset_authority.assets import list_assets
+
+
+# Load canonical execution registrations before serving requests.
+initialize_runtime()
+
+app = FastAPI(
+    title="Whalezchain Orchestrator"
+)
+
+
+@app.exception_handler(ValueError)
+async def validation_error_handler(
+    request: Request,
+    exc: ValueError,
+):
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "error": "validation_error",
+            "detail": str(exc),
+        },
+    )
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "whalezchain-orchestrator",
+    }
+
+
+@app.get("/assets")
+def assets():
+    return {
+        "status": "ok",
+        "assets": list_assets(),
+    }
+
+
+@app.post(
+    "/testnet/transfer",
+    response_model=TestnetTransferResponse,
+)
+def testnet_transfer(
+    request: TestnetTransferRequest,
+):
+    result = execute(
+        from_account=request.from_account,
+        to_account=request.to_account,
+        asset_symbol=request.asset_symbol,
+        amount=request.amount,
+    )
+
+    return TestnetTransferResponse(
+        proposal_id=result["proposal_id"],
+        execution=result["execution"],
+        ledger_receipt=result["ledger_receipt"],
+    )
+
+
+@app.get("/debug/state")
+def debug_state():
+    from .whalezchain_testnet_engine.runtime import engine
+    return engine.state()

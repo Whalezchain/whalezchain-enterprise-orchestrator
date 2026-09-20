@@ -1,0 +1,317 @@
+from decimal import Decimal
+
+import pytest
+
+from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+    account,
+    label_for_account,
+    signed_mainnet_transaction,
+)
+
+from whalezchain_orchestrator.mainnet import (
+    MainnetStateTransition,
+    MainnetTransaction,
+    StateTransitionError,
+    state_root,
+)
+
+
+CHAIN_ID = "whalezchain-mainnet-v1"
+ALICE = account("alice")
+BOB = account("bob")
+CAROL = account("carol")
+
+
+def make_tx(
+    tx_id: str,
+    sender: str,
+    recipient: str,
+    amount: str,
+    nonce: int = 0,
+    ordering_key: str = "00000000000000000001",
+    asset_symbol: str = "WHZ",
+):
+    return signed_mainnet_transaction(
+        tx_id=tx_id,
+        sender_label=label_for_account(sender),
+        recipient_label=label_for_account(recipient),
+        asset_symbol=asset_symbol,
+        amount=amount,
+        nonce=nonce,
+        ordering_key=ordering_key,
+    )
+
+
+def initial_state():
+    return {
+        ALICE: {
+            "WHZ": "100.00000000",
+            "PTN": "0.00000000",
+            "PRN": "0.00000000",
+        },
+        BOB: {
+            "WHZ": "0.00000000",
+            "PTN": "0.00000000",
+            "PRN": "0.00000000",
+        },
+    }
+
+
+def test_single_transfer_changes_balances():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "25.00000000",
+    )
+
+    result = MainnetStateTransition().apply(
+        initial_state(),
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    assert (
+        result["state"]
+        [ALICE]
+        ["WHZ"]
+        == "75.00000000"
+    )
+
+    assert (
+        result["state"]
+        [BOB]
+        ["WHZ"]
+        == "25.00000000"
+    )
+
+
+def test_state_root_is_deterministic():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "25.00000000",
+    )
+
+    a = MainnetStateTransition().apply(
+        initial_state(),
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    b = MainnetStateTransition().apply(
+        initial_state(),
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    assert a["state_root"] == b["state_root"]
+
+
+def test_state_root_changes_after_transition():
+    before = state_root(initial_state())
+
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "25.00000000",
+    )
+
+    result = MainnetStateTransition().apply(
+        initial_state(),
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    assert result["state_root"] != before
+
+
+def test_transactions_execute_sequentially():
+    tx1 = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "25.00000000",
+        ordering_key="00000000000000000001",
+    )
+
+    tx2 = make_tx(
+        "tx-002",
+        BOB,
+        CAROL,
+        "10.00000000",
+        ordering_key="00000000000000000002",
+    )
+
+    result = MainnetStateTransition().apply(
+        initial_state(),
+        [tx1, tx2],
+        chain_id=CHAIN_ID,
+    )
+
+    assert (
+        result["state"]
+        [ALICE]
+        ["WHZ"]
+        == "75.00000000"
+    )
+
+    assert (
+        result["state"]
+        [BOB]
+        ["WHZ"]
+        == "15.00000000"
+    )
+
+    assert (
+        result["state"]
+        [CAROL]
+        ["WHZ"]
+        == "10.00000000"
+    )
+
+
+def test_insufficient_balance_rejects_transition():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "101.00000000",
+    )
+
+    with pytest.raises(
+        (ValueError, StateTransitionError),
+        match="insufficient sender balance",
+    ):
+        MainnetStateTransition().apply(
+            initial_state(),
+            [tx],
+            chain_id=CHAIN_ID,
+        )
+
+
+def test_failed_block_does_not_mutate_original_state():
+    original = initial_state()
+
+    tx1 = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "50.00000000",
+    )
+
+    tx2 = make_tx(
+        "tx-002",
+        ALICE,
+        BOB,
+        "100.00000000",
+        ordering_key="00000000000000000002",
+    )
+
+    before = state_root(original)
+
+    with pytest.raises(
+        (ValueError, StateTransitionError),
+        match="insufficient sender balance",
+    ):
+        MainnetStateTransition().apply(
+            original,
+            [tx1, tx2],
+            chain_id=CHAIN_ID,
+        )
+
+    assert state_root(original) == before
+
+    assert (
+        original
+        [ALICE]
+        ["WHZ"]
+        == "100.00000000"
+    )
+
+
+def test_duplicate_transaction_is_rejected():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "10.00000000",
+    )
+
+    with pytest.raises(
+        StateTransitionError,
+        match="duplicate transaction",
+    ):
+        MainnetStateTransition().apply(
+            initial_state(),
+            [tx, tx],
+            chain_id=CHAIN_ID,
+        )
+
+
+def test_committed_transaction_is_rejected():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "10.00000000",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="already been committed",
+    ):
+        MainnetStateTransition().apply(
+            initial_state(),
+            [tx],
+            chain_id=CHAIN_ID,
+            known_tx_hashes=[tx.tx_hash],
+        )
+
+
+def test_transition_contains_per_transaction_evidence():
+    tx = make_tx(
+        "tx-001",
+        ALICE,
+        BOB,
+        "10.00000000",
+    )
+
+    result = MainnetStateTransition().apply(
+        initial_state(),
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    evidence = result["transitions"][0]
+
+    assert evidence["tx_hash"] == tx.tx_hash
+    assert evidence["status"] == "APPLIED"
+    assert len(evidence["before_state_root"]) == 64
+    assert len(evidence["after_state_root"]) == 64
+    assert evidence["before_state_root"] != evidence["after_state_root"]
+
+
+def test_asset_balances_remain_separated():
+    tx = make_tx(
+        "tx-asset-001",
+        ALICE,
+        BOB,
+        "10.00000000",
+        asset_symbol="PTN",
+    )
+
+    state = initial_state()
+    state[ALICE]["PTN"] = "50.00000000"
+
+    result = MainnetStateTransition().apply(
+        state,
+        [tx],
+        chain_id=CHAIN_ID,
+    )
+
+    assert result["state"][ALICE]["PTN"] == "40.00000000"
+    assert result["state"][BOB]["PTN"] == "10.00000000"
+    assert result["state"][ALICE]["WHZ"] == "100.00000000"
