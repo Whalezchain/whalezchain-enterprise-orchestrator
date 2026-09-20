@@ -315,3 +315,178 @@ def test_asset_balances_remain_separated():
     assert result["state"][ALICE]["PTN"] == "40.00000000"
     assert result["state"][BOB]["PTN"] == "10.00000000"
     assert result["state"][ALICE]["WHZ"] == "100.00000000"
+
+
+def test_prn_issuance_requires_explicit_policy():
+    from whalezchain_orchestrator.mainnet.state_transition import (
+        MainnetStateTransition,
+        StateTransitionError,
+    )
+    from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+        signed_mainnet_transaction,
+    )
+
+    tx = signed_mainnet_transaction(
+        tx_id="PRN-ISSUE-001",
+        sender_label="alice",
+        recipient_label="receiver",
+        asset_symbol="PRN",
+        amount="2",
+        nonce=0,
+        transaction_type="mint_prn",
+        ordering_key="000001",
+    )
+
+    try:
+        MainnetStateTransition().apply(
+            {
+                tx.sender: {"PTN": "0", "PRN": "0", "WHZ": "0"},
+                tx.recipient: {"PTN": "0", "PRN": "0", "WHZ": "0"},
+            },
+            [tx],
+            chain_id="whalezchain-mainnet-v1",
+        )
+    except Exception as exc:
+        assert "issuance policy is not configured" in str(exc)
+    else:
+        raise AssertionError("PRN issuance was accepted without policy")
+
+
+def test_prn_issuance_credits_recipient_without_debiting_issuer():
+    from decimal import Decimal
+
+    from whalezchain_orchestrator.mainnet.issuance_policy import (
+        PRNIssuancePolicy,
+    )
+    from whalezchain_orchestrator.mainnet.state_transition import (
+        MainnetStateTransition,
+    )
+    from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+        account,
+        signed_mainnet_transaction,
+    )
+
+    tx = signed_mainnet_transaction(
+        tx_id="PRN-ISSUE-002",
+        sender_label="alice",
+        recipient_label="receiver",
+        asset_symbol="PRN",
+        amount="2",
+        nonce=0,
+        transaction_type="mint_prn",
+        ordering_key="000002",
+    )
+
+    policy = PRNIssuancePolicy(
+        authorized_issuers=frozenset({account("alice")}),
+        max_supply=Decimal("10"),
+    )
+
+    result = MainnetStateTransition().apply(
+        {
+            tx.sender: {"PTN": "5", "PRN": "0", "WHZ": "0"},
+            tx.recipient: {"PTN": "0", "PRN": "1", "WHZ": "0"},
+        },
+        [tx],
+        chain_id="whalezchain-mainnet-v1",
+        issuance_policy=policy,
+    )
+
+    state = result["state"]
+
+    assert state[tx.sender]["PTN"] == "5"
+    assert state[tx.sender]["PRN"] == "0"
+    assert state[tx.recipient]["PRN"] == "3.00000000"
+    assert result["transitions"][0]["status"] == "APPLIED"
+
+
+def test_prn_issuance_rejects_unauthorized_issuer():
+    from decimal import Decimal
+
+    from whalezchain_orchestrator.mainnet.issuance_policy import (
+        PRNIssuancePolicy,
+    )
+    from whalezchain_orchestrator.mainnet.state_transition import (
+        MainnetStateTransition,
+    )
+    from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+        account,
+        signed_mainnet_transaction,
+    )
+
+    tx = signed_mainnet_transaction(
+        tx_id="PRN-ISSUE-003",
+        sender_label="alice",
+        recipient_label="receiver",
+        asset_symbol="PRN",
+        amount="1",
+        nonce=0,
+        transaction_type="mint_prn",
+        ordering_key="000003",
+    )
+
+    policy = PRNIssuancePolicy(
+        authorized_issuers=frozenset({account("bob")}),
+        max_supply=Decimal("10"),
+    )
+
+    try:
+        MainnetStateTransition().apply(
+            {
+                tx.sender: {"PTN": "5", "PRN": "0", "WHZ": "0"},
+                tx.recipient: {"PTN": "0", "PRN": "0", "WHZ": "0"},
+            },
+            [tx],
+            chain_id="whalezchain-mainnet-v1",
+            issuance_policy=policy,
+        )
+    except Exception as exc:
+        assert "issuer is not authorized" in str(exc)
+    else:
+        raise AssertionError("unauthorized PRN issuance was accepted")
+
+
+def test_prn_issuance_respects_max_supply():
+    from decimal import Decimal
+
+    from whalezchain_orchestrator.mainnet.issuance_policy import (
+        PRNIssuancePolicy,
+    )
+    from whalezchain_orchestrator.mainnet.state_transition import (
+        MainnetStateTransition,
+    )
+    from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+        account,
+        signed_mainnet_transaction,
+    )
+
+    tx = signed_mainnet_transaction(
+        tx_id="PRN-ISSUE-004",
+        sender_label="alice",
+        recipient_label="receiver",
+        asset_symbol="PRN",
+        amount="2",
+        nonce=0,
+        transaction_type="mint_prn",
+        ordering_key="000004",
+    )
+
+    policy = PRNIssuancePolicy(
+        authorized_issuers=frozenset({account("alice")}),
+        max_supply=Decimal("10"),
+    )
+
+    try:
+        MainnetStateTransition().apply(
+            {
+                tx.sender: {"PTN": "0", "PRN": "9", "WHZ": "0"},
+                tx.recipient: {"PTN": "0", "PRN": "0", "WHZ": "0"},
+            },
+            [tx],
+            chain_id="whalezchain-mainnet-v1",
+            issuance_policy=policy,
+        )
+    except Exception as exc:
+        assert "exceed maximum supply" in str(exc)
+    else:
+        raise AssertionError("PRN issuance exceeded maximum supply")

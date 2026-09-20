@@ -9,6 +9,7 @@ from .authentication import (
 )
 from .transaction import MainnetTransaction
 from apps.whalezchain_orchestrator.asset_authority.authority import asset_authority
+from .issuance_policy import PRNIssuancePolicy, PRNIssuancePolicyError
 
 
 class TransactionValidationError(ValueError):
@@ -24,6 +25,8 @@ class MainnetTransactionValidator:
         known_tx_hashes: Iterable[str] = (),
         expected_nonce: int | None = None,
         sender_balance: str | Decimal | None = None,
+        issuance_policy: PRNIssuancePolicy | None = None,
+        current_prn_supply: str | Decimal | None = None,
     ) -> None:
         if not isinstance(tx, MainnetTransaction):
             raise TransactionValidationError(
@@ -50,10 +53,24 @@ class MainnetTransactionValidator:
                 "transaction recipient is required"
             )
 
-        if tx.transaction_type != "transfer":
+        if tx.transaction_type not in {"transfer", "mint_prn"}:
             raise TransactionValidationError(
                 "unsupported transaction type"
             )
+
+        if tx.transaction_type == "mint_prn":
+            if tx.asset_symbol != "PRN":
+                raise TransactionValidationError(
+                    "mint_prn transactions must use PRN"
+                )
+            if issuance_policy is None:
+                raise TransactionValidationError(
+                    "PRN issuance policy is not configured"
+                )
+            try:
+                issuance_policy.validate_issuer(tx.sender)
+            except PRNIssuancePolicyError as exc:
+                raise TransactionValidationError(str(exc)) from exc
 
         try:
             asset_authority.validate(tx.asset_symbol)
@@ -73,6 +90,26 @@ class MainnetTransactionValidator:
             raise TransactionValidationError(
                 "transaction amount must be greater than zero"
             )
+
+        if tx.transaction_type == "mint_prn":
+            if current_prn_supply is None:
+                raise TransactionValidationError(
+                    "current PRN supply is required for issuance"
+                )
+            try:
+                current_supply = Decimal(current_prn_supply)
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise TransactionValidationError(
+                    "current PRN supply must be a valid decimal"
+                ) from exc
+            if not current_supply.is_finite() or current_supply < 0:
+                raise TransactionValidationError(
+                    "current PRN supply must be finite and non-negative"
+                )
+            try:
+                issuance_policy.validate_supply(current_supply, amount)
+            except PRNIssuancePolicyError as exc:
+                raise TransactionValidationError(str(exc)) from exc
 
         if tx.nonce < 0:
             raise TransactionValidationError(
@@ -96,7 +133,7 @@ class MainnetTransactionValidator:
                 f"transaction authentication failed: {exc}"
             ) from exc
 
-        if sender_balance is not None:
+        if tx.transaction_type == "transfer" and sender_balance is not None:
             try:
                 balance = Decimal(sender_balance)
             except (InvalidOperation, TypeError, ValueError) as exc:

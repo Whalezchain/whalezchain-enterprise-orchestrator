@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable
 
 from ..asset_authority import ASSET_REGISTRY
+from .issuance_policy import PRNIssuancePolicy
 from .transaction import MainnetTransaction, sha256_hex
 from .transaction_validator import (
     MainnetTransactionValidator,
@@ -89,6 +90,7 @@ class MainnetStateTransition:
         *,
         chain_id: str,
         known_tx_hashes: Iterable[str] = (),
+        issuance_policy: PRNIssuancePolicy | None = None,
     ) -> Dict[str, Any]:
 
         working_state = deepcopy(initial_state)
@@ -141,6 +143,19 @@ class MainnetStateTransition:
                 )
             )
 
+            current_prn_supply = sum(
+                (
+                    _decimal(
+                        account_state.get(
+                            "PRN",
+                            "0.00000000",
+                        )
+                    )
+                    for account_state in working_state.values()
+                ),
+                Decimal("0"),
+            )
+
             # Validate against the state as it exists immediately
             # before this transaction.
             self.validator.validate(
@@ -148,6 +163,8 @@ class MainnetStateTransition:
                 expected_chain_id=chain_id,
                 known_tx_hashes=committed_hashes,
                 sender_balance=sender_balance,
+                issuance_policy=issuance_policy,
+                current_prn_supply=current_prn_supply,
             )
 
             before_root = state_root(
@@ -161,17 +178,24 @@ class MainnetStateTransition:
                 )
             )
 
-            sender[
-                tx.asset_symbol
-            ] = _normalize_balance(
-                sender_balance - amount
-            )
+            if tx.transaction_type == "mint_prn":
+                recipient[
+                    "PRN"
+                ] = _normalize_balance(
+                    recipient_balance + amount
+                )
+            else:
+                sender[
+                    tx.asset_symbol
+                ] = _normalize_balance(
+                    sender_balance - amount
+                )
 
-            recipient[
-                tx.asset_symbol
-            ] = _normalize_balance(
-                recipient_balance + amount
-            )
+                recipient[
+                    tx.asset_symbol
+                ] = _normalize_balance(
+                    recipient_balance + amount
+                )
 
             after_root = state_root(
                 working_state
