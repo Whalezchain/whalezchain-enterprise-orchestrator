@@ -1,7 +1,7 @@
-"""Phase 23.1 - trade+PRN with local ledger fallback"""
+"""Whalezchain Web - read surface with fail-closed Mainnet execution."""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import httpx, os, hashlib, uuid, json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,13 +52,11 @@ def assets():
 
 @app.get("/api/receipt")
 def receipt():
-    ld=call_bridge("whalezchain.web:ledger_summary")
-    ex=ld.get("result",{}).get("execution",{}).get("execution_result",{})
-    total=ex.get("total_events",0)
-    local=sum(1 for _ in open(LEDGER_PATH)) if LEDGER_PATH.exists() else 0
-    combined=total+local
-    root=hashlib.sha256(f"{combined}-{local}-{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()[:32]
-    return {"receipt_type":"whalezchain_web_phase_23_receipt","merkle_root":root,"total_events":combined,"core_events":total,"local_trades":local,"counts_by_kind":ex.get("counts_by_kind",{}),"timestamp":datetime.now(timezone.utc).isoformat()}
+    return {
+        "status": "unavailable",
+        "error": "mainnet_not_live",
+        "detail": "Canonical Mainnet receipts are unavailable until authorized block finalization is implemented.",
+    }
 
 @app.get("/api/balances")
 def balances():
@@ -73,31 +71,34 @@ def list_trades():
 
 @app.post("/api/trade")
 def trade(payload: dict):
-    tid=f"PTN-{uuid.uuid4().hex[:8].upper()}"
-    entry={"type":"trade","trade_id":tid,"pair":payload.get("pair","PTN/USDC"),"side":payload.get("side","buy"),"amount":payload.get("amount",1),"price":payload.get("price",100),"status":"executed"}
-    append_local(entry)
-    return {"trade_id":tid,"status":"executed","entry":entry}
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "unavailable",
+            "error": "mainnet_not_live",
+            "detail": "Trade execution is disabled until the canonical Mainnet runtime and authorized finalization path are live.",
+        },
+    )
+
 
 @app.post("/api/mint/prn")
 def mint_prn(payload: dict):
-    mid=f"PRN-{uuid.uuid4().hex[:8].upper()}"
-    trade_id=payload.get("trade_id","")
-    if not trade_id and LEDGER_PATH.exists():
-        try:
-            last=json.loads(open(LEDGER_PATH).readlines()[-1])
-            trade_id=last.get("trade_id","")
-        except: pass
-    root=hashlib.sha256(f"{mid}-{trade_id}".encode()).hexdigest()[:32]
-    entry={"type":"mint_prn","mint_id":mid,"trade_id":trade_id,"asset":"PRN","merkle_root":root,"amount":payload.get("amount",1),"status":"minted"}
-    append_local(entry)
-    return {"mint_id":mid,"asset":"PRN","trade_id":trade_id,"merkle_root":root,"status":"minted","entry":entry}
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "unavailable",
+            "error": "mainnet_not_live",
+            "detail": "PRN issuance is disabled until the canonical Mainnet issuance and finalization path are live.",
+        },
+    )
+
 
 @app.get("/ui", response_class=HTMLResponse)
 def ui():
     return """<!DOCTYPE html><html><head><title>Whalezchain 23.1</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui;background:#0a0a0a;color:#eee;padding:16px}h1{color:#f5c518}.card{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.btn{background:#f5c518;color:#000;border:none;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer}pre{background:#000;padding:12px;border-radius:8px;overflow:auto;max-height:320px;font-size:11px;white-space:pre-wrap}</style></head><body>
-<h1>🐋 Whalezchain 23.1 TRADE+PRN ✅</h1><div class=grid><div class=card><h3>Bridge</h3><pre id=bridge>...</pre></div><div class=card><h3>Receipt (core+local)</h3><pre id=receipt>...</pre></div><div class=card><h3>Local Trades</h3><pre id=trades>...</pre></div></div>
-<div class=card><h3>Execute Trade PTN</h3><input id=pair value=PTN/USDC style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><select id=side style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><option>buy</option><option>sell</option></select><input id=amt type=number value=1 style=width:70px;background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><button class=btn onclick=doTrade()>EXECUTE</button><pre id=tradeRes></pre></div>
-<div class=card><h3>Mint PRN (Plutoranium)</h3><input id=tradeId placeholder="PTN-... (auto last)" style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px;width:200px><button class=btn onclick=doMint()>MINT PRN</button><pre id=mintRes></pre></div>
+<h1>🐋 Whalezchain 23.1 — Mainnet Not Live</h1><div class=grid><div class=card><h3>Bridge</h3><pre id=bridge>...</pre></div><div class=card><h3>Canonical Receipt</h3><pre id=receipt>...</pre></div><div class=card><h3>Local Trade History</h3><pre id=trades>...</pre></div></div>
+<div class=card><h3>PTN Trade — Mainnet Disabled</h3><input id=pair value=PTN/USDC style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><select id=side style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><option>buy</option><option>sell</option></select><input id=amt type=number value=1 style=width:70px;background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px><button class=btn onclick=doTrade()>MAINNET DISABLED</button><pre id=tradeRes></pre></div>
+<div class=card><h3>PRN Mint — Mainnet Disabled</h3><input id=tradeId placeholder="PTN-... (auto last)" style=background:#000;color:#eee;border:1px solid #333;padding:8px;border-radius:6px;width:200px><button class=btn onclick=doMint()>MAINNET DISABLED</button><pre id=mintRes></pre></div>
 <div class=card><h3>Ledger Core</h3><pre id=ledger>...</pre></div>
 <script>async function j(u,o){let r=await fetch(u,o);return r.json()}async function load(){let ld=await j('/api/ledger');let ex=ld.result?.execution?.execution_result||ld;document.getElementById('bridge').innerText=JSON.stringify(ex,null,2).slice(0,1000);document.getElementById('ledger').innerText=JSON.stringify(ex,null,2);let rc=await j('/api/receipt');document.getElementById('receipt').innerText=JSON.stringify(rc,null,2);let tr=await j('/api/trades');document.getElementById('trades').innerText=JSON.stringify(tr,null,2)}async function doTrade(){let p={pair:document.getElementById('pair').value,side:document.getElementById('side').value,amount:parseFloat(document.getElementById('amt').value)};let r=await j('/api/trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});document.getElementById('tradeRes').innerText=JSON.stringify(r,null,2);if(r.trade_id)document.getElementById('tradeId').value=r.trade_id;load()}async function doMint(){let p={trade_id:document.getElementById('tradeId').value||undefined,amount:1};let r=await j('/api/mint/prn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});document.getElementById('mintRes').innerText=JSON.stringify(r,null,2);load()}load();setInterval(load,5000)</script></body></html>"""
 
