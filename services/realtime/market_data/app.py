@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hmac
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 
 from .store import MarketDataStore
 
@@ -28,6 +29,13 @@ def _is_stale(payload: dict[str, Any]) -> bool:
     return age_ms > int(payload.get("stale_after_ms", 5000))
 
 
+
+def _require_token(token: str | None) -> None:
+    expected = os.getenv("MARKET_DATA_RUNTIME_TOKEN", "").strip()
+    if not expected or not token or not hmac.compare_digest(expected, token):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 app = FastAPI(title="Whalez-AI Live Market Data")
 
 
@@ -45,7 +53,8 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/v1/market/sources")
-def sources() -> dict[str, Any]:
+def sources(x_whalez_market_data_token: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_token(x_whalez_market_data_token)
     return {"status": "ok", "sources": _store().sources()}
 
 
@@ -53,7 +62,9 @@ def sources() -> dict[str, Any]:
 def quote(
     symbol: str = Query(min_length=2),
     source_id: str | None = Query(default=None),
+    x_whalez_market_data_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    _require_token(x_whalez_market_data_token)
     rows = _store().latest(symbol.upper(), source_id=source_id)
     if not rows:
         raise HTTPException(status_code=404, detail="quote_not_available")
