@@ -157,7 +157,11 @@ class MainnetStateTransition:
 
             before_root = state_root(working_state)
 
-            if tx.transaction_type == "settlement_attestation":
+            if tx.transaction_type in {
+                "settlement_attestation",
+                "settlement_release",
+                "settlement_slash",
+            }:
                 # The external fiat/asset settlement is observed outside
                 # WhalezChain. This native attestation commits the policy
                 # derived WHZ assurance without transferring a tradable
