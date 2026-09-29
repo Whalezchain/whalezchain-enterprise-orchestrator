@@ -17,6 +17,7 @@ from .chain_store import MainnetChainStore, ChainStoreError
 from .finalization_authorization import (
     MainnetFinalizationAuthorization,
 )
+from .genesis_economic_state import economic_state_root
 from .transaction import MainnetTransaction, sha256_hex
 
 
@@ -320,14 +321,7 @@ def _build_candidate(
         transactions=transactions,
         resulting_state_root=str(head["state_root"]),
         economic_state_root=(
-            sha256_hex({
-                "economic_state_root": str(economic_state.get("_unused", "")),
-            })
-            if False
-            else __import__(
-                "whalezchain_orchestrator.mainnet.genesis_economic_state",
-                fromlist=["economic_state_root"],
-            ).economic_state_root(economic_state)
+economic_state_root(economic_state)
         ),
         proposer_id="whalez-ai-external-settlement",
     )
