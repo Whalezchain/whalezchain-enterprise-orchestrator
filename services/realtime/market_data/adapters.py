@@ -198,6 +198,47 @@ async def stream_kraken_quotes(
             )
 
 
+def list_oanda_currency_instruments() -> list[str]:
+    account_id = os.getenv("OANDA_ACCOUNT_ID", "").strip()
+    token = os.getenv("OANDA_ACCESS_TOKEN", "").strip()
+    base_url = os.getenv(
+        "OANDA_REST_URL",
+        "https://api-fxtrade.oanda.com/v3/accounts",
+    ).rstrip("/")
+
+    if not account_id or not token:
+        raise RuntimeError("oanda_account_not_configured")
+
+    req = Request(
+        f"{base_url}/{account_id}/instruments",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept-Datetime-Format": "RFC3339",
+        },
+    )
+    try:
+        raw = urlopen(req, timeout=15).read().decode("utf-8")
+        payload = json.loads(raw)
+    except Exception as exc:
+        raise RuntimeError("oanda_instruments_unavailable") from exc
+
+    instruments = payload.get("instruments", [])
+    if not isinstance(instruments, list):
+        raise RuntimeError("oanda_instruments_invalid")
+
+    result: list[str] = []
+    for item in instruments:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "CURRENCY":
+            continue
+        name = str(item.get("name", "")).strip().upper()
+        if "_" not in name:
+            continue
+        result.append(name)
+    return sorted(set(result))
+
+
 def _oanda_quote(payload: dict[str, Any]) -> MarketQuote | None:
     if payload.get("type") != "PRICE":
         return None
