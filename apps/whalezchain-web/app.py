@@ -5,23 +5,29 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import httpx, os, hashlib, uuid, json
 from datetime import datetime, timezone
 from pathlib import Path
+import logging
 
 app = FastAPI(title="Whalezchain Web", version="23.1")
+logger = logging.getLogger("whalezchain-web")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 CORE = os.getenv("WHALEZ_CORE_URL", "http://127.0.0.1:8081")
-KEY = os.getenv("WHALEZ_API_KEY", "dev-local-key")
+KEY = os.getenv("WHALEZ_API_KEY", "")
 ORCH = os.getenv("WHALEZCHAIN_ORCH_URL", "http://127.0.0.1:8793")
 LEDGER_PATH = Path.home() / "whalez/ledger/whalezchain-trades.jsonl"
 LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def call_bridge(task):
+    if not KEY:
+        logger.error("Whalez-AI core bridge API key is not configured")
+        return {"error": "bridge_unavailable"}
     try:
         with httpx.Client(timeout=15) as c:
             r = c.post(f"{CORE}/v1/tasks/dispatch", headers={"X-API-Key": KEY, "Content-Type": "application/json"}, json={"actor":"founder-replica","task":task,"request":{"resource":task.split(":")[-1],"mode":"read","risk":"read_sensitive","justification":"Phase 23 UI"}})
             return r.json()
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Whalez-AI core bridge request failed", extra={"task": task})
+        return {"error": "bridge_unavailable"}
 
 def append_local(entry):
     entry["ts"]=datetime.now(timezone.utc).isoformat()
