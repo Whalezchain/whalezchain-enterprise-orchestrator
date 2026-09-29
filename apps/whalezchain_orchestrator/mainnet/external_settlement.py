@@ -13,8 +13,6 @@ from .block_builder import MainnetBlockBuilder
 from .chain_store import MainnetChainStore, ChainStoreError
 from .finalization_authorization import (
     MainnetFinalizationAuthorization,
-    build_finalization_payload,
-    from_execution_authorization,
 )
 from .transaction import canonical_json, sha256_hex
 
@@ -103,8 +101,7 @@ def _build_request(payload: dict[str, Any]) -> ExternalSettlement:
         "provider_transaction_id",
         "provider_event_id",
         "provider_domain",
-        "finalization_payload",
-        "execution_authorization",
+        "approval_id",
     )
     missing = [key for key in required if payload.get(key) in (None, "")]
     if missing:
@@ -241,6 +238,7 @@ def _build_candidate(
     store: MainnetChainStore,
     settlement: ExternalSettlement,
     *,
+    approval_id: str,
     timestamp: str,
 ) -> dict[str, Any]:
     head = store.finalized_head()
@@ -280,18 +278,26 @@ def _build_candidate(
         consensus_evidence=consensus_evidence,
     )
 
+    if not approval_id:
+        raise ExternalSettlementError("missing_approval_id")
+
     genesis = store.load_genesis()
-    finalization_payload = build_finalization_payload(
-        approval_id=str(settlement.correlation_id),
-        execution_hash=settlement.evidence_hash,
-        chain_id=store.chain_id,
-        genesis_hash=str(genesis["genesis_hash"]),
-        height=finalized_candidate.height,
-        previous_block_hash=finalized_candidate.previous_block_hash,
-        transaction_root=finalized_candidate.transaction_root,
-        resulting_state_root=finalized_candidate.resulting_state_root,
-        economic_state_root=finalized_candidate.economic_state_root,
-        block_hash=finalized_candidate.block_hash,
+    finalization_payload = {
+        "authorization_type": "wcz.mainnet.finalization_authorization.v1",
+        "approval_id": approval_id,
+        "chain_id": store.chain_id,
+        "genesis_hash": str(genesis["genesis_hash"]),
+        "height": finalized_candidate.height,
+        "previous_block_hash": finalized_candidate.previous_block_hash,
+        "transaction_root": finalized_candidate.transaction_root,
+        "resulting_state_root": finalized_candidate.resulting_state_root,
+        "economic_state_root": finalized_candidate.economic_state_root,
+        "block_hash": finalized_candidate.block_hash,
+        "authority": "WHALEZ_AI",
+        "execution_mode": "mainnet_finalization",
+    }
+    finalization_payload["target_payload_hash"] = sha256_hex(
+        finalization_payload
     )
 
     return {
@@ -318,12 +324,18 @@ def prepare_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
             if existing:
                 return {**existing, "replay": True}
 
-            candidate = _build_candidate(store, settlement, timestamp=str(payload.get("timestamp") or _now()))
+            candidate = _build_candidate(
+                store,
+                settlement,
+                approval_id=str(payload.get("approval_id", "")).strip(),
+                timestamp=str(payload.get("timestamp") or _now()),
+            )
             result = {
                 "status": "FINALIZATION_AUTHORIZATION_REQUIRED",
                 "finalized": False,
                 "correlation_id": settlement.correlation_id,
                 "idempotency_key": settlement.idempotency_key,
+                "approval_id": str(payload["approval_id"]).strip(),
                 "block": candidate["block"],
                 "finalization_payload": candidate["finalization_payload"],
                 "external_settlement_evidence_hash": settlement.evidence_hash,
@@ -358,9 +370,11 @@ def finalize_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
             if existing:
                 return {**existing, "replay": True}
 
+            approval_id = str(finalization_payload.get("approval_id", "")).strip()
             candidate = _build_candidate(
                 store,
                 settlement,
+                approval_id=approval_id,
                 timestamp=str(block_data.get("timestamp") or ""),
             )
 
@@ -371,9 +385,51 @@ def finalize_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
             if finalization_payload != candidate["finalization_payload"]:
                 raise ExternalSettlementError("finalization_payload_changed")
 
-            authorization = from_execution_authorization(
-                execution_authorization,
-                finalization_payload=finalization_payload,
+            required_auth_fields = (
+                "approval_id",
+                "execution_hash",
+                "target_payload_hash",
+            )
+            for key in required_auth_fields:
+                if not str(execution_authorization.get(key, "")).strip():
+                    raise ExternalSettlementError(
+                        "execution_authorization_missing_" + key
+                    )
+
+            if str(execution_authorization["approval_id"]).strip() != approval_id:
+                raise ExternalSettlementError("approval_id_mismatch")
+
+            target_without_hash = {
+                key: value
+                for key, value in finalization_payload.items()
+                if key != "target_payload_hash"
+            }
+            expected_target_hash = sha256_hex(target_without_hash)
+            if (
+                str(execution_authorization["target_payload_hash"]).strip()
+                != str(finalization_payload["target_payload_hash"])
+                or str(finalization_payload["target_payload_hash"])
+                != expected_target_hash
+            ):
+                raise ExternalSettlementError(
+                    "finalization_target_payload_hash_mismatch"
+                )
+
+            authorization = MainnetFinalizationAuthorization(
+                authorization_type=str(finalization_payload["authorization_type"]),
+                approval_id=str(execution_authorization["approval_id"]),
+                execution_hash=str(execution_authorization["execution_hash"]),
+                target_payload_hash=str(execution_authorization["target_payload_hash"]),
+                chain_id=str(finalization_payload["chain_id"]),
+                genesis_hash=str(finalization_payload["genesis_hash"]),
+                height=int(finalization_payload["height"]),
+                previous_block_hash=str(finalization_payload["previous_block_hash"]),
+                transaction_root=str(finalization_payload["transaction_root"]),
+                resulting_state_root=str(finalization_payload["resulting_state_root"]),
+                economic_state_root=str(finalization_payload["economic_state_root"]),
+                block_hash=str(finalization_payload["block_hash"]),
+                authority=str(finalization_payload["authority"]),
+                execution_mode=str(finalization_payload["execution_mode"]),
             )
 
             block = _block_from_dict(block_data)
