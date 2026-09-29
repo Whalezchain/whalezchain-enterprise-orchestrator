@@ -120,28 +120,16 @@ class MainnetStateTransition:
                     "amount must be greater than zero"
                 )
 
-            sender = working_state.setdefault(
-                tx.sender,
-                {
-                    symbol: "0.00000000"
-                    for symbol in ASSET_REGISTRY
-                },
-            )
+            sender = working_state.get(tx.sender)
 
-            recipient = working_state.setdefault(
-                tx.recipient,
-                {
-                    symbol: "0.00000000"
-                    for symbol in ASSET_REGISTRY
-                },
-            )
-
-            sender_balance = _decimal(
-                sender.get(
-                    tx.asset_symbol,
-                    "0.00000000",
+            sender_balance = None
+            if sender is not None:
+                sender_balance = _decimal(
+                    sender.get(
+                        tx.asset_symbol,
+                        "0.00000000",
+                    )
                 )
-            )
 
             current_prn_supply = sum(
                 (
@@ -167,35 +155,63 @@ class MainnetStateTransition:
                 current_prn_supply=current_prn_supply,
             )
 
-            before_root = state_root(
-                working_state
-            )
+            before_root = state_root(working_state)
 
-            recipient_balance = _decimal(
-                recipient.get(
-                    tx.asset_symbol,
-                    "0.00000000",
-                )
-            )
-
-            if tx.transaction_type == "mint_prn":
-                recipient[
-                    "PRN"
-                ] = _normalize_balance(
-                    recipient_balance + amount
-                )
+            if tx.transaction_type == "settlement_attestation":
+                # The external fiat/asset settlement is observed outside
+                # WhalezChain. This native attestation commits the policy
+                # derived WHZ assurance without transferring a tradable
+                # balance. Economic state locking is applied by ChainStore.
+                pass
             else:
-                sender[
-                    tx.asset_symbol
-                ] = _normalize_balance(
-                    sender_balance - amount
+                recipient = working_state.setdefault(
+                    tx.recipient,
+                    {
+                        symbol: "0.00000000"
+                        for symbol in ASSET_REGISTRY
+                    },
                 )
 
-                recipient[
-                    tx.asset_symbol
-                ] = _normalize_balance(
-                    recipient_balance + amount
+                recipient_balance = _decimal(
+                    recipient.get(
+                        tx.asset_symbol,
+                        "0.00000000",
+                    )
                 )
+
+                if tx.transaction_type == "mint_prn":
+                    recipient[
+                        "PRN"
+                    ] = _normalize_balance(
+                        recipient_balance + amount
+                    )
+                else:
+                    if sender is None:
+                        sender = working_state.setdefault(
+                            tx.sender,
+                            {
+                                symbol: "0.00000000"
+                                for symbol in ASSET_REGISTRY
+                            },
+                        )
+                        sender_balance = _decimal(
+                            sender.get(
+                                tx.asset_symbol,
+                                "0.00000000",
+                            )
+                        )
+
+                    sender[
+                        tx.asset_symbol
+                    ] = _normalize_balance(
+                        sender_balance - amount
+                    )
+
+                    recipient[
+                        tx.asset_symbol
+                    ] = _normalize_balance(
+                        recipient_balance + amount
+                    )
 
             after_root = state_root(
                 working_state
