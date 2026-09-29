@@ -218,7 +218,9 @@ def build_finalization_payload(
         "execution_mode": "mainnet_finalization",
     }
 
-    payload["target_payload_hash"] = sha256_hex(payload)
+    payload["target_payload_hash"] = sha256_hex(
+        {key: value for key, value in payload.items() if key != "target_payload_hash"}
+    )
 
     return payload
 
