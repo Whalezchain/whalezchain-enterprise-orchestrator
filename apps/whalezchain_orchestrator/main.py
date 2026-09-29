@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Request
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .bootstrap import initialize_runtime
@@ -9,6 +11,11 @@ from .models import (
 from .services.execution_service import execute
 from .asset_authority import asset_authority
 from .asset_authority.assets import list_assets
+from .mainnet.external_settlement import (
+    ExternalSettlementError,
+    prepare_external_settlement,
+    finalize_external_settlement,
+)
 
 
 # Load canonical execution registrations before serving requests.
