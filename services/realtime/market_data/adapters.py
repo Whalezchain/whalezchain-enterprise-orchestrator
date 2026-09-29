@@ -246,7 +246,9 @@ async def stream_oanda_quotes(
         f"?instruments={quote(instrument_list, safe=",")}"
     )
 
-    def blocking_stream() -> list[dict[str, Any]]:
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+
+    def blocking_stream() -> None:
         req = Request(
             url,
             headers={
@@ -254,28 +256,40 @@ async def stream_oanda_quotes(
                 "Accept-Datetime-Format": "RFC3339",
             },
         )
-        events: list[dict[str, Any]] = []
-        with urlopen(req, timeout=30) as response:
-            for raw in response:
-                line = raw.decode("utf-8").strip()
-                if not line:
-                    continue
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(item, dict):
-                    events.append(item)
-                if len(events) >= 32:
-                    break
-        return events
+        try:
+            with urlopen(req, timeout=65) as response:
+                for raw in response:
+                    line = raw.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict):
+                        asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
+        except Exception as exc:
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"type": "STREAM_ERROR", "error": str(exc)}),
+                loop,
+            ).result()
+
+    loop = asyncio.get_running_loop()
 
     while True:
-        events = await asyncio.to_thread(blocking_stream)
-        for event in events:
-            quote_event = _oanda_quote(event)
-            if quote_event is not None:
-                yield quote_event
+        task = asyncio.create_task(asyncio.to_thread(blocking_stream))
+        try:
+            while True:
+                event = await queue.get()
+                if event.get("type") == "STREAM_ERROR":
+                    break
+                quote_event = _oanda_quote(event)
+                if quote_event is not None:
+                    yield quote_event
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.sleep(1)
 
 
 async def stream_twelvedata_quotes(
