@@ -9,12 +9,15 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from .authentication import derive_account_id, sign_transaction
 from .block_builder import MainnetBlockBuilder
 from .chain_store import MainnetChainStore, ChainStoreError
 from .finalization_authorization import (
     MainnetFinalizationAuthorization,
 )
-from .transaction import canonical_json, sha256_hex
+from .transaction import MainnetTransaction, sha256_hex
 
 
 EXTERNAL_SETTLEMENT_TYPE = "whalezchain.external_settlement_attestation.v1"
@@ -138,15 +141,6 @@ def _build_request(payload: dict[str, Any]) -> ExternalSettlement:
 
     required_whz = _decimal_or_none(payload.get("settlement_required_whz"))
 
-    # The current canonical chain state transition knows how to lock WHZ
-    # through MainnetTransaction, but an external fiat attestation is not
-    # itself a native balance transfer. Until a governed native transaction
-    # mapping is supplied, refusing the lock path is the safe behavior.
-    if required_whz is not None:
-        raise ExternalSettlementError(
-            "whz_bond_lock_requires_native_transaction_path"
-        )
-
     return ExternalSettlement(
         correlation_id=str(payload["correlation_id"]).strip(),
         idempotency_key=str(payload["idempotency_key"]).strip(),
@@ -198,6 +192,67 @@ def _with_lock(store: MainnetChainStore):
     return handle
 
 
+def _settlement_signer() -> tuple[Ed25519PrivateKey, str]:
+    raw = os.getenv("WHALEZ_SETTLEMENT_SIGNER_PRIVATE_KEY_HEX", "").strip()
+    if not raw:
+        raise ExternalSettlementError("settlement_signer_not_configured")
+    try:
+        key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(raw))
+    except ValueError as exc:
+        raise ExternalSettlementError("settlement_signer_invalid") from exc
+    return key, derive_account_id(key.public_key().public_bytes_raw())
+
+
+def _build_settlement_attestation_tx(
+    store: MainnetChainStore,
+    settlement: ExternalSettlement,
+    *,
+    height: int,
+) -> MainnetTransaction | None:
+    if settlement.settlement_required_whz is None:
+        return None
+
+    key, settlement_account_id = _settlement_signer()
+    current_economic_state = store._replay_economic_state()
+    if settlement_account_id not in current_economic_state.get("accounts", {}):
+        raise ExternalSettlementError(
+            "settlement_signer_economic_account_not_initialized"
+        )
+
+    tx_unsigned = MainnetTransaction(
+        chain_id=store.chain_id,
+        tx_id=f"settlement-attestation:{settlement.idempotency_key}",
+        sender=settlement_account_id,
+        recipient=settlement_account_id,
+        asset_symbol="WHZ",
+        amount=settlement.settlement_required_whz,
+        nonce=max(height, 0),
+        transaction_type="settlement_attestation",
+        authorization={
+            "scheme": "ed25519-v1",
+            "public_key": key.public_key().public_bytes_raw().hex(),
+            "signature": "",
+        },
+        ordering_key=f"{height:020d}:{settlement.idempotency_key}",
+        settlement_required_whz=settlement.settlement_required_whz,
+    )
+
+    signed = sign_transaction(tx_unsigned, key)
+    return MainnetTransaction(
+        chain_id=tx_unsigned.chain_id,
+        tx_id=tx_unsigned.tx_id,
+        sender=tx_unsigned.sender,
+        recipient=tx_unsigned.recipient,
+        asset_symbol=tx_unsigned.asset_symbol,
+        amount=tx_unsigned.amount,
+        nonce=tx_unsigned.nonce,
+        transaction_type=tx_unsigned.transaction_type,
+        authorization=signed,
+        ordering_key=tx_unsigned.ordering_key,
+        settlement_required_whz=tx_unsigned.settlement_required_whz,
+    )
+
+
 def _block_from_dict(data: dict[str, Any]):
     from .block import MainnetBlock
     from .transaction import MainnetTransaction
@@ -242,14 +297,38 @@ def _build_candidate(
     timestamp: str,
 ) -> dict[str, Any]:
     head = store.finalized_head()
+    height = int(head["height"]) + 1
+    attestation_tx = _build_settlement_attestation_tx(
+        store,
+        settlement,
+        height=height,
+    )
+    transactions = (attestation_tx,) if attestation_tx is not None else ()
+
+    economic_state = store._replay_economic_state()
+    if transactions:
+        economic_state = store._economic_state_after_transactions(
+            economic_state,
+            transactions,
+        )
+
     block = MainnetBlockBuilder().build(
         chain_id=store.chain_id,
-        height=int(head["height"]) + 1,
+        height=height,
         previous_block_hash=str(head["block_hash"]),
         timestamp=timestamp,
-        transactions=[],
+        transactions=transactions,
         resulting_state_root=str(head["state_root"]),
-        economic_state_root=str(head["economic_state_root"]),
+        economic_state_root=(
+            sha256_hex({
+                "economic_state_root": str(economic_state.get("_unused", "")),
+            })
+            if False
+            else __import__(
+                "whalezchain_orchestrator.mainnet.genesis_economic_state",
+                fromlist=["economic_state_root"],
+            ).economic_state_root(economic_state)
+        ),
         proposer_id="whalez-ai-external-settlement",
     )
 
@@ -303,7 +382,9 @@ def _build_candidate(
     return {
         "block": finalized_candidate.unsigned_dict() | {
             "block_hash": finalized_candidate.block_hash,
-            "transactions": [],
+            "transactions": [
+                tx.signed_dict() for tx in finalized_candidate.transactions
+            ],
         },
         "finalization_payload": finalization_payload,
         "external_settlement_evidence_hash": settlement.evidence_hash,
@@ -469,7 +550,16 @@ def finalize_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
                 "previous_block_hash": block.previous_block_hash,
                 "head": new_head,
                 "settlement_required_whz": settlement.settlement_required_whz,
-                "settlement_status": "NONE",
+                "settlement_account": (
+                    _settlement_signer()[1]
+                    if settlement.settlement_required_whz is not None
+                    else None
+                ),
+                "settlement_status": (
+                    "WHZ_LOCKED"
+                    if settlement.settlement_required_whz is not None
+                    else "NONE"
+                ),
                 "timestamp": _now(),
             }
             receipt_hash = sha256_hex(receipt_body)
