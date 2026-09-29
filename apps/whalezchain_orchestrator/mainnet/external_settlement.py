@@ -370,7 +370,7 @@ economic_state_root(economic_state)
         "execution_mode": "mainnet_finalization",
     }
     finalization_payload["target_payload_hash"] = sha256_hex(
-        finalization_payload
+        {key: value for key, value in finalization_payload.items() if key != "target_payload_hash"}
     )
 
     return {
