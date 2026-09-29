@@ -75,3 +75,19 @@ def testnet_transfer(
 def debug_state():
     from .whalezchain_testnet_engine.runtime import engine
     return engine.state()
+
+
+@app.post("/mainnet/settlement/prepare")
+def mainnet_settlement_prepare(payload: dict[str, Any]):
+    try:
+        return prepare_external_settlement(payload)
+    except ExternalSettlementError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/mainnet/settlement/finalize")
+def mainnet_settlement_finalize(payload: dict[str, Any]):
+    try:
+        return finalize_external_settlement(payload)
+    except ExternalSettlementError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
