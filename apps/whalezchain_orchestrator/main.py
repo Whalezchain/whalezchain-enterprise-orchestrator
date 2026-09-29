@@ -1,6 +1,8 @@
+import hmac
+import os
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .bootstrap import initialize_runtime
@@ -39,6 +41,13 @@ async def validation_error_handler(
             "detail": str(exc),
         },
     )
+
+
+
+def _require_mainnet_token(token: str | None) -> None:
+    expected = os.getenv("WHALEZ_CHAIN_INTERNAL_TOKEN", "").strip()
+    if not expected or not token or not hmac.compare_digest(expected, token):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 @app.get("/health")
@@ -85,7 +94,11 @@ def debug_state():
 
 
 @app.post("/mainnet/settlement/prepare")
-def mainnet_settlement_prepare(payload: dict[str, Any]):
+def mainnet_settlement_prepare(
+    payload: dict[str, Any],
+    x_whalez_chain_token: str | None = Header(default=None),
+):
+    _require_mainnet_token(x_whalez_chain_token)
     try:
         return prepare_external_settlement(payload)
     except ExternalSettlementError as exc:
@@ -93,7 +106,11 @@ def mainnet_settlement_prepare(payload: dict[str, Any]):
 
 
 @app.post("/mainnet/settlement/finalize")
-def mainnet_settlement_finalize(payload: dict[str, Any]):
+def mainnet_settlement_finalize(
+    payload: dict[str, Any],
+    x_whalez_chain_token: str | None = Header(default=None),
+):
+    _require_mainnet_token(x_whalez_chain_token)
     try:
         return finalize_external_settlement(payload)
     except ExternalSettlementError as exc:
