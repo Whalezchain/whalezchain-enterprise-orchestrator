@@ -1,0 +1,1 @@
+"""WhalezChain service namespace."""
