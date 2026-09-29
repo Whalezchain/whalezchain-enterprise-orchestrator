@@ -31,6 +31,7 @@ class MainnetTransaction:
     transaction_type: str
     authorization: dict[str, Any]
     ordering_key: str
+    settlement_required_whz: str | None = None
 
     def signing_authorization(self) -> dict[str, Any]:
         """
@@ -62,6 +63,7 @@ class MainnetTransaction:
             "transaction_type": self.transaction_type,
             "authorization": self.signing_authorization(),
             "ordering_key": self.ordering_key,
+            "settlement_required_whz": self.settlement_required_whz,
         }
 
     def canonical_signing_bytes(self) -> bytes:
@@ -85,6 +87,7 @@ class MainnetTransaction:
             "transaction_type": self.transaction_type,
             "authorization": self.authorization,
             "ordering_key": self.ordering_key,
+            "settlement_required_whz": self.settlement_required_whz,
         }
 
     def unsigned_dict(self) -> dict[str, Any]:

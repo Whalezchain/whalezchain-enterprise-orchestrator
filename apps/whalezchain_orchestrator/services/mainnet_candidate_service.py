@@ -5,6 +5,11 @@ from typing import Any, Mapping
 
 from ..mainnet.block_builder import MainnetBlockBuilder
 from ..mainnet.state_transition import MainnetStateTransition
+from ..mainnet.genesis_economic_state import (
+    economic_state_root,
+    canonical_economic_state,
+)
+from ..mainnet.settlement import lock_whz_bond
 from ..mainnet.transaction import MainnetTransaction
 
 
@@ -40,6 +45,7 @@ class MainnetCandidateService:
         *,
         transaction: MainnetTransaction,
         initial_state: Mapping[str, Mapping[str, str]],
+        economic_state: Mapping[str, Any],
         height: int = 0,
         previous_block_hash: str = "",
         timestamp: str | None = None,
@@ -57,6 +63,25 @@ class MainnetCandidateService:
             timezone.utc
         ).isoformat()
 
+        settlement_transition = None
+
+        if transaction.settlement_required_whz is not None:
+            settlement_transition = lock_whz_bond(
+                dict(economic_state),
+                account_id=transaction.sender,
+                required_whz=transaction.settlement_required_whz,
+            )
+            resulting_economic_state = settlement_transition["state"]
+        else:
+            resulting_economic_state = dict(economic_state)
+
+        canonical_economics = canonical_economic_state(
+            resulting_economic_state
+        )
+        canonical_economic_root = economic_state_root(
+            canonical_economics
+        )
+
         transition = self.state_transition.apply(
             dict(initial_state),
             [transaction],
@@ -71,6 +96,7 @@ class MainnetCandidateService:
             timestamp=candidate_timestamp,
             transactions=[transaction],
             resulting_state_root=transition["state_root"],
+            economic_state_root=canonical_economic_root,
             proposer_id=self.proposer_id,
         )
 
@@ -87,7 +113,18 @@ class MainnetCandidateService:
             "transaction_root": block.transaction_root,
             "before_state_root": transition_evidence["before_state_root"],
             "resulting_state_root": transition["state_root"],
+            "economic_state_root": canonical_economic_root,
             "state_transition_status": transition_evidence["status"],
+            "settlement_status": (
+                settlement_transition["status"]
+                if settlement_transition
+                else "NONE"
+            ),
+            "settlement_required_whz": (
+                settlement_transition["required_whz"]
+                if settlement_transition
+                else None
+            ),
             "consensus": block.consensus_evidence,
         }
 
@@ -96,6 +133,7 @@ class MainnetCandidateService:
             "finalized": False,
             "transaction": transaction.signed_dict(),
             "transition": transition,
+            "economic_state": resulting_economic_state,
             "block": block,
             "receipt": receipt,
         }

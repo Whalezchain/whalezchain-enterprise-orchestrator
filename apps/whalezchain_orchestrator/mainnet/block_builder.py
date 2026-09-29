@@ -21,6 +21,7 @@ class MainnetBlockBuilder:
         timestamp: str,
         transactions: Iterable[MainnetTransaction],
         resulting_state_root: str,
+        economic_state_root: str,
         proposer_id: str,
     ) -> MainnetBlock:
 
@@ -47,6 +48,11 @@ class MainnetBlockBuilder:
         if not resulting_state_root:
             raise BlockConstructionError(
                 "missing resulting state root"
+            )
+
+        if not economic_state_root:
+            raise BlockConstructionError(
+                "missing economic state root"
             )
 
         if not proposer_id:
@@ -77,6 +83,7 @@ class MainnetBlockBuilder:
             transactions=txs,
             transaction_root=transaction_root,
             resulting_state_root=resulting_state_root,
+            economic_state_root=economic_state_root,
             proposer_id=proposer_id,
             consensus_evidence={
                 "status": "pending",

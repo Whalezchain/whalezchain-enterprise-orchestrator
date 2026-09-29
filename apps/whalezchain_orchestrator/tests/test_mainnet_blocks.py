@@ -3,9 +3,19 @@ from whalezchain_orchestrator.mainnet import (
     MainnetTransaction,
     BlockConstructionError,
 )
+from whalezchain_orchestrator.mainnet.genesis_economic_state import (
+    initialize_genesis_economic_state,
+    economic_state_root,
+)
 
 
 CHAIN_ID = "whalezchain-mainnet-v1"
+
+def economic_root():
+    state = initialize_genesis_economic_state(
+        ptn_genesis_supply="1000.00000000",
+    )
+    return economic_state_root(state)
 
 
 def make_tx(tx_id: str, ordering_key: str):
@@ -34,6 +44,7 @@ def make_block(txs):
         timestamp="2026-08-30T00:00:00Z",
         transactions=txs,
         resulting_state_root="1" * 64,
+        economic_state_root=economic_root(),
         proposer_id="whalezchain://validator/test-validator",
     )
 
@@ -110,6 +121,7 @@ def test_missing_previous_hash_rejected_for_non_genesis_block():
             timestamp="2026-08-30T00:00:00Z",
             transactions=(),
             resulting_state_root="1" * 64,
+            economic_state_root=economic_root(),
             proposer_id="validator-1",
         )
     except BlockConstructionError as exc:
@@ -128,6 +140,7 @@ def test_genesis_height_can_have_empty_previous_hash():
         timestamp="2026-08-30T00:00:00Z",
         transactions=(),
         resulting_state_root="1" * 64,
+        economic_state_root=economic_root(),
         proposer_id="validator-1",
     )
 
@@ -154,6 +167,7 @@ def test_missing_proposer_is_rejected():
             timestamp="2026-08-30T00:00:00Z",
             transactions=(),
             resulting_state_root="1" * 64,
+            economic_state_root=economic_root(),
             proposer_id="",
         )
     except BlockConstructionError as exc:

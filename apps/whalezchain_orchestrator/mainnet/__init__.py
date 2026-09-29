@@ -44,3 +44,37 @@ __all__ = [
     "canonical_state",
     "state_root",
 ]
+
+from .genesis import (
+    GenesisValidationError,
+    GenesisValidator,
+    MainnetGenesis,
+    MAINNET_CHAIN_ID,
+    MAINNET_NETWORK_CLASS,
+    build_genesis,
+    verify_genesis,
+)
+
+__all__ += [
+    "GenesisValidationError",
+    "GenesisValidator",
+    "MainnetGenesis",
+    "MAINNET_CHAIN_ID",
+    "MAINNET_NETWORK_CLASS",
+    "build_genesis",
+    "verify_genesis",
+]
+
+from .finalization_authorization import (
+    FINALIZATION_AUTHORIZATION_TYPE,
+    FinalizationAuthorizationError,
+    MainnetFinalizationAuthorization,
+    build_finalization_payload,
+)
+
+__all__ += [
+    "FINALIZATION_AUTHORIZATION_TYPE",
+    "FinalizationAuthorizationError",
+    "MainnetFinalizationAuthorization",
+    "build_finalization_payload",
+]

@@ -37,6 +37,7 @@ class MainnetBlock:
     transactions: tuple[MainnetTransaction, ...]
     transaction_root: str
     resulting_state_root: str
+    economic_state_root: str
     proposer_id: str
     consensus_evidence: dict[str, Any]
 
@@ -52,6 +53,7 @@ class MainnetBlock:
             ],
             "transaction_root": self.transaction_root,
             "resulting_state_root": self.resulting_state_root,
+            "economic_state_root": self.economic_state_root,
             "proposer_id": self.proposer_id,
             "consensus_evidence": self.consensus_evidence,
         }
