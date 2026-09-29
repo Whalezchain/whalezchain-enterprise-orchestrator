@@ -43,4 +43,7 @@ jobs:
           assert q.mid == Decimal("1.1001")
           assert q.spread == Decimal("0.0002")
           print("MARKET_DATA_MODEL_PASS")
+
+      - name: Run durable store tests
+        run: pytest -q services/realtime/market_data/test_store.py
           PY
