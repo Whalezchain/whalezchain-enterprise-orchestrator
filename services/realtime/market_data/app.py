@@ -44,8 +44,15 @@ def health() -> dict[str, Any]:
     sources = _store().sources()
     live = sum(1 for item in sources if item["status"] == "LIVE")
     degraded = sum(1 for item in sources if item["status"] == "DEGRADED")
+    if degraded:
+        status = "degraded"
+    elif live > 0:
+        status = "ok"
+    else:
+        status = "not_configured"
+
     return {
-        "status": "ok" if not degraded else "degraded",
+        "status": status,
         "service": "realtime-market-data",
         "live_sources": live,
         "degraded_sources": degraded,
