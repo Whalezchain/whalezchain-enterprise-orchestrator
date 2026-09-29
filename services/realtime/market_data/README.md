@@ -20,7 +20,7 @@ The worker supports live public market feeds from:
 - Coinbase Advanced Trade ticker channels.
 - Kraken Spot WebSocket v2 ticker channels.
 
-The Binance global ticker path provides broad spot-universe top-of-market/rolling statistics. Full depth/trade streams remain separately configurable per venue and symbol.
+The Binance global ticker path provides broad spot-universe top-of-market/rolling statistics. This is broad venue coverage, not a claim that every cryptocurrency or every venue globally is covered. Full depth/trade streams remain separately configurable per venue and symbol.
 
 ### FX
 
@@ -29,7 +29,7 @@ The worker supports:
 - OANDA v20 pricing stream for live bid/ask/liquidity on account-eligible instruments.
 - Twelve Data exchange-rate polling as a rate-only fallback.
 
-OANDA is the execution-grade FX market-data adapter in this implementation. Twelve Data fallback values are explicitly marked LIVE_RATE_ONLY and must not be used as execution prices.
+OANDA is the execution-grade FX market-data adapter in this implementation. When `MARKET_DATA_FX_ALL=true`, the service queries the configured OANDA account for its full tradeable `CURRENCY` instrument set and subscribes to those pairs; that set is account/jurisdiction dependent. Twelve Data fallback values are explicitly marked LIVE_RATE_ONLY and must not be used as execution prices.
 
 ## Canonical quote fields
 
