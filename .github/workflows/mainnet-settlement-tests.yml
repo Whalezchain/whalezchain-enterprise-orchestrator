@@ -1,0 +1,24 @@
+name: Mainnet Settlement Tests
+
+on:
+  pull_request:
+    paths:
+      - "apps/whalezchain_orchestrator/**"
+      - ".github/workflows/mainnet-settlement-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest cryptography fastapi uvicorn
+      - name: Run settlement and economic tests
+        run: |
+          pytest -q             apps/whalezchain_orchestrator/tests/test_external_settlement.py             apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_economic_root.py             apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_persistence.py
