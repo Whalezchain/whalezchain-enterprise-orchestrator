@@ -1,0 +1,46 @@
+name: Live Market Data Tests
+
+on:
+  pull_request:
+    paths:
+      - "services/realtime/market_data/**"
+      - ".github/workflows/live-market-data-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install market data dependencies
+        run: python -m pip install --upgrade pip pytest fastapi uvicorn websockets
+      - name: Compile market data package
+        run: python -m compileall -q services/realtime/market_data
+      - name: Run adapter model tests
+        run: |
+          python - <<'PY'
+          from decimal import Decimal
+          from services.realtime.market_data.models import MarketQuote
+          
+          q = MarketQuote(
+              source_id="test.source",
+              venue="TEST",
+              asset_class="fx",
+              symbol="EUR/USD",
+              base_asset="EUR",
+              quote_asset="USD",
+              bid=Decimal("1.1000"),
+              ask=Decimal("1.1002"),
+              last=Decimal("1.1001"),
+              timestamp="2026-09-29T00:00:00+00:00",
+              received_at="2026-09-29T00:00:00+00:00",
+          )
+          assert q.mid == Decimal("1.1001")
+          assert q.spread == Decimal("0.0002")
+          print("MARKET_DATA_MODEL_PASS")
+          PY
