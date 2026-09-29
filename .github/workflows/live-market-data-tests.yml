@@ -46,4 +46,3 @@ jobs:
 
       - name: Run durable store tests
         run: pytest -q services/realtime/market_data/test_store.py
-          PY
