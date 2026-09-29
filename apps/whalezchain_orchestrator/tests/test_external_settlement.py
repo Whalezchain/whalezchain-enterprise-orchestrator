@@ -1,7 +1,8 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+
 
 from whalezchain_orchestrator.mainnet.external_settlement import (
     ExternalSettlementError,
@@ -15,6 +16,7 @@ from whalezchain_orchestrator.mainnet.genesis_economic_state import (
 
 
 def _genesis():
+    settlement_account = account("settlement")
     return build_genesis(
         genesis_timestamp="2026-09-20T05:59:00Z",
         initial_state={},
@@ -25,10 +27,42 @@ def _genesis():
             ),
         ),
         authority_config={"mode": "test"},
-        economic_state=initialize_genesis_economic_state(
-            ptn_genesis_supply="1000.00000000",
-        ),
+        economic_state={
+            **initialize_genesis_economic_state(
+                ptn_genesis_supply="1000.00000000",
+            ),
+            "accounts": {
+                settlement_account: {
+                    "level": "L3",
+                    "trading_capital": "0.00000000",
+                    "whz_bond": "100.00000000",
+                    "whz_bond_locked": "0.00000000",
+                }
+            },
+        },
     )
+
+
+def account(label: str) -> str:
+    from whalezchain_orchestrator.mainnet.authentication import derive_account_id
+    return derive_account_id(private_key(label).public_key().public_bytes_raw())
+
+
+def private_key(label: str):
+    import hashlib
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    seed = hashlib.sha256(
+        f"whalezchain-test-key:{label}".encode("utf-8")
+    ).digest()
+    return Ed25519PrivateKey.from_private_bytes(seed)
+
+
+def _settlement_key_hex() -> str:
+    return private_key("settlement").private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).hex()
 
 
 def _payload():
@@ -119,7 +153,7 @@ def test_prepare_then_finalize_is_idempotent(
     assert store.verify_chain()["verified"] is True
 
 
-def test_whz_requirement_fails_closed_until_native_lock_mapping_exists(
+def test_whz_requirement_commits_native_settlement_attestation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -130,6 +164,10 @@ def test_whz_requirement_fails_closed_until_native_lock_mapping_exists(
     monkeypatch.setenv(
         "WHALEZCHAIN_MAINNET_EXECUTION_ENABLED",
         "true",
+    )
+    monkeypatch.setenv(
+        "WHALEZ_SETTLEMENT_SIGNER_PRIVATE_KEY_HEX",
+        _settlement_key_hex(),
     )
 
     from whalezchain_orchestrator.mainnet.chain_store import MainnetChainStore
@@ -142,8 +180,22 @@ def test_whz_requirement_fails_closed_until_native_lock_mapping_exists(
         "settlement_required_whz": "10.00000000",
     }
 
-    with pytest.raises(
-        ExternalSettlementError,
-        match="whz_bond_lock_requires_native_transaction_path",
-    ):
-        prepare_external_settlement(payload)
+    prepared = prepare_external_settlement(payload)
+    assert prepared["block"]["transactions"][0]["transaction_type"] == "settlement_attestation"
+    assert prepared["block"]["transactions"][0]["settlement_required_whz"] == "10.00000000"
+
+    final = finalize_external_settlement({
+        **payload,
+        "block": prepared["block"],
+        "finalization_payload": prepared["finalization_payload"],
+        "execution_authorization": {
+            "approval_id": "apr-live-001",
+            "execution_hash": "exec-hash-whz-001",
+            "target_payload_hash": prepared["finalization_payload"]["target_payload_hash"],
+        },
+    })
+
+    assert final["canonical_receipt"]["settlement_status"] == "WHZ_LOCKED"
+    economic_state = store._replay_economic_state()
+    locked = economic_state["accounts"][account("settlement")]["whz_bond_locked"]
+    assert locked == "10.00000000"
