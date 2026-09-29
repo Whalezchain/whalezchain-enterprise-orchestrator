@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from .block import MainnetBlock
 from .state_transition import MainnetStateTransition, state_root
 from .genesis_economic_state import economic_state_root
-from .settlement import lock_whz_bond
+from .settlement import lock_whz_bond, release_whz_bond, slash_whz_bond
 from .transaction import MainnetTransaction, canonical_json, sha256_hex
 from .transaction_validator import MainnetTransactionValidator
 from .genesis import MainnetGenesis, verify_genesis
@@ -517,11 +517,25 @@ class MainnetChainStore:
             if required is None:
                 continue
 
-            result = lock_whz_bond(
-                state,
-                account_id=tx.sender,
-                required_whz=required,
-            )
+            if tx.transaction_type == "settlement_release":
+                result = release_whz_bond(
+                    state,
+                    account_id=tx.sender,
+                    required_whz=required,
+                )
+            elif tx.transaction_type == "settlement_slash":
+                result = slash_whz_bond(
+                    state,
+                    account_id=tx.sender,
+                    required_whz=required,
+                )
+            else:
+                result = lock_whz_bond(
+                    state,
+                    account_id=tx.sender,
+                    required_whz=required,
+                )
+
             state = result["state"]
 
         return state
