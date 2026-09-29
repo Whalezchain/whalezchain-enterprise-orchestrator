@@ -53,10 +53,30 @@ class MainnetTransactionValidator:
                 "transaction recipient is required"
             )
 
-        if tx.transaction_type not in {"transfer", "mint_prn"}:
+        if tx.transaction_type not in {"transfer", "mint_prn", "settlement_attestation"}:
             raise TransactionValidationError(
                 "unsupported transaction type"
             )
+
+        if tx.transaction_type == "settlement_attestation":
+            if tx.asset_symbol != "WHZ":
+                raise TransactionValidationError(
+                    "settlement_attestation transactions must use WHZ"
+                )
+            if tx.settlement_required_whz is None:
+                raise TransactionValidationError(
+                    "settlement_attestation requires settlement_required_whz"
+                )
+            try:
+                required_whz = Decimal(tx.settlement_required_whz)
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise TransactionValidationError(
+                    "settlement_required_whz must be a valid decimal"
+                ) from exc
+            if not required_whz.is_finite() or required_whz <= 0:
+                raise TransactionValidationError(
+                    "settlement_required_whz must be greater than zero"
+                )
 
         if tx.transaction_type == "mint_prn":
             if tx.asset_symbol != "PRN":
