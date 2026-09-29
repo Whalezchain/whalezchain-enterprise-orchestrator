@@ -6,6 +6,7 @@ from contextlib import suppress
 from typing import Awaitable, Callable
 
 from .adapters import (
+    list_oanda_currency_instruments,
     stream_binance_quotes,
     stream_coinbase_quotes,
     stream_kraken_quotes,
@@ -81,6 +82,18 @@ async def run_workers(store: MarketDataStore) -> None:
         "MARKET_DATA_FX_SYMBOLS",
         "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,USD/CAD,NZD/USD,USD/NGN",
     )
+    if (
+        os.getenv("MARKET_DATA_FX_ALL", "true").lower() == "true"
+        and os.getenv("OANDA_ACCESS_TOKEN")
+        and os.getenv("OANDA_ACCOUNT_ID")
+    ):
+        try:
+            fx_symbols = list_oanda_currency_instruments()
+        except Exception:
+            # Keep the configured fallback set if account-instrument discovery
+            # is temporarily unavailable. The source remains observable as
+            # degraded rather than silently claiming full FX coverage.
+            pass
 
     tasks: list[asyncio.Task] = [
         asyncio.create_task(
