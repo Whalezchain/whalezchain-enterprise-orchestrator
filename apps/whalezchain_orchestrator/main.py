@@ -1,5 +1,6 @@
 import hmac
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -23,7 +24,6 @@ from .mainnet.settlement_bond import (
     SettlementBondStateError,
     get_settlement_bond_state,
 )
-from pathlib import Path
 
 
 # Load canonical execution registrations before serving requests.
