@@ -136,4 +136,3 @@ def get_settlement_bond_state(
         or datetime.now(timezone.utc).isoformat(),
         "reservation_semantics": "reserved_whz_aliases_whz_bond_locked",
     }
-}
