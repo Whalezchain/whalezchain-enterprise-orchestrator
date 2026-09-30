@@ -175,9 +175,20 @@ def test_whz_requirement_commits_native_settlement_attestation(
     store = MainnetChainStore(tmp_path / "chain")
     store.initialize_genesis(_genesis())
 
+    settlement_account = account("settlement")
     payload = {
         **_payload(),
         "settlement_required_whz": "10.00000000",
+        "whz_bond_snapshot": {
+            "status": "VERIFIED",
+            "account_id": settlement_account,
+            "bond_state_id": "bond-state-001",
+            "available_whz": "100.00000000",
+            "locked_whz": "0.00000000",
+            "reserved_whz": "0.00000000",
+            "required_whz": "10.00000000",
+            "policy_version": "genesis-v1.1",
+        },
     }
 
     prepared = prepare_external_settlement(payload)
@@ -197,5 +208,5 @@ def test_whz_requirement_commits_native_settlement_attestation(
 
     assert final["canonical_receipt"]["settlement_status"] == "WHZ_LOCKED"
     economic_state = store._replay_economic_state()
-    locked = economic_state["accounts"][account("settlement")]["whz_bond_locked"]
+    locked = economic_state["accounts"][settlement_account]["whz_bond_locked"]
     assert locked == "10.00000000"
