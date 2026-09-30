@@ -43,6 +43,7 @@ class ExternalSettlement:
     provider_event_id: str
     provider_domain: str
     settlement_required_whz: str | None
+    settlement_bond_account_id: str | None
 
     def canonical_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class ExternalSettlement:
             "provider_event_id": self.provider_event_id,
             "provider_domain": self.provider_domain,
             "settlement_required_whz": self.settlement_required_whz,
+            "settlement_bond_account_id": self.settlement_bond_account_id,
         }
 
     @property
@@ -142,6 +144,29 @@ def _build_request(payload: dict[str, Any]) -> ExternalSettlement:
 
     required_whz = _decimal_or_none(payload.get("settlement_required_whz"))
 
+    bond_account_id: str | None = None
+    if required_whz is not None:
+        snapshot = payload.get("whz_bond_snapshot")
+        if not isinstance(snapshot, dict):
+            raise ExternalSettlementError("whz_bond_snapshot_required")
+
+        bond_account_id = str(snapshot.get("account_id", "")).strip()
+        snapshot_required = _decimal_or_none(snapshot.get("required_whz"))
+        if not bond_account_id:
+            raise ExternalSettlementError("whz_bond_account_missing")
+        if snapshot_required != required_whz:
+            raise ExternalSettlementError("whz_bond_requirement_mismatch")
+        try:
+            available = Decimal(str(snapshot.get("available_whz")))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ExternalSettlementError("invalid_whz_bond_snapshot") from exc
+        if (
+            not available.is_finite()
+            or available < 0
+            or available < Decimal(required_whz)
+        ):
+            raise ExternalSettlementError("whz_bond_snapshot_insufficient")
+
     return ExternalSettlement(
         correlation_id=str(payload["correlation_id"]).strip(),
         idempotency_key=str(payload["idempotency_key"]).strip(),
@@ -156,6 +181,7 @@ def _build_request(payload: dict[str, Any]) -> ExternalSettlement:
         provider_event_id=str(payload["provider_event_id"]).strip(),
         provider_domain=str(payload["provider_domain"]).strip(),
         settlement_required_whz=required_whz,
+        settlement_bond_account_id=bond_account_id,
     )
 
 
@@ -214,6 +240,11 @@ def _build_settlement_attestation_tx(
         return None
 
     key, settlement_account_id = _settlement_signer()
+    if (
+        settlement.settlement_bond_account_id != settlement_account_id
+    ):
+        raise ExternalSettlementError("settlement_bond_account_mismatch")
+
     current_economic_state = store._replay_economic_state()
     if settlement_account_id not in current_economic_state.get("accounts", {}):
         raise ExternalSettlementError(
