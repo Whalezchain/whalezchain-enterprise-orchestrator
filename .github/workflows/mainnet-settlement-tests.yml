@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest cryptography fastapi uvicorn
+        run: python -m pip install --upgrade pip pytest cryptography fastapi uvicorn httpx2
       - name: Run settlement and economic tests
         run: |
           pytest -q \
