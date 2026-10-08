@@ -50,3 +50,10 @@ def test_canonical_assets_are_exposed_read_only():
 
     assert body["status"] == "ok"
     assert set(body["assets"]) == {"WHZ", "PTN", "PRN"}
+    assert body["assets"]["WHZ"]["canonical_asset_name"] == "Whalez-Mint"
+    assert body["assets"]["PTN"]["canonical_asset_name"] == "Plutonium"
+    assert body["assets"]["PRN"]["canonical_asset_name"] == "Plutoranium"
+    assert all(
+        body["assets"][symbol]["identity_status"] == "CANONICAL"
+        for symbol in ("WHZ", "PTN", "PRN")
+    )
