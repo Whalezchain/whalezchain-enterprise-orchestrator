@@ -102,6 +102,20 @@ No new asset may silently appear in Mainnet v1.
 Any later asset introduction must be an explicit future governance
 change.
 
+### 4.1 Canonical product identities
+
+| Symbol | Product identity | Technical role class |
+| --- | --- | --- |
+| WHZ | Whalez-Mint | ecosystem_policy_unit |
+| PTN | Plutonium | platform_trade_note |
+| PRN | Plutoranium | platform_receipt_note |
+
+The technical role class exists for implementation, governance,
+and audit clarity. It does not replace the product identity.
+
+The identity table does not create any market-price, liquidity,
+custody, settlement, exchange-listing, or jurisdictional claim.
+
 ---
 
 ## 5. MAINNET COMPONENTS
