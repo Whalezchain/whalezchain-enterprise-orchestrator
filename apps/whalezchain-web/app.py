@@ -48,7 +48,23 @@ def assets():
             if r.status_code==200:
                 return r.json()
     except: pass
-    return {"assets":{"PRN":{"asset_role_class":"platform_receipt_note","canonical_asset_name":"Plutoranium"},"PTN":{"asset_role_class":"platform_trade_note","canonical_asset_name":"Plutonium"},"WHZ":{"asset_role_class":"ecosystem_policy_unit","canonical_asset_name":"Whalez Mint"}},"status":"ok"}
+    return {"assets":{
+        "WHZ":{
+            "canonical_asset_name":"Whalez-Mint",
+            "asset_role_class":"ecosystem_policy_unit",
+            "identity_status":"CANONICAL"
+        },
+        "PTN":{
+            "canonical_asset_name":"Plutonium",
+            "asset_role_class":"platform_trade_note",
+            "identity_status":"CANONICAL"
+        },
+        "PRN":{
+            "canonical_asset_name":"Plutoranium",
+            "asset_role_class":"platform_receipt_note",
+            "identity_status":"CANONICAL"
+        }
+    },"status":"ok"}
 
 @app.get("/api/receipt")
 def receipt():
