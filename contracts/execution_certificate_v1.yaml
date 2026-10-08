@@ -1,0 +1,83 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://whalezchain.com/schemas/execution-certificate/v1"
+title: Whalez Execution Certificate v1
+type: object
+additionalProperties: false
+required:
+  - kind
+  - version
+  - certificate_id
+  - execution
+  - governance_verdict
+  - execution_report
+  - attestations
+  - verification
+properties:
+  kind:
+    const: wsp.execution_certificate
+  version:
+    const: "1.0"
+  certificate_id:
+    type: string
+  execution:
+    type: object
+    additionalProperties: false
+    required:
+      - task_id
+      - intent_id
+      - correlation_id
+      - tool_id
+      - verb
+      - resource
+      - result_hash
+      - execution_report_hash
+    properties:
+      task_id: {type: string}
+      intent_id: {type: string}
+      correlation_id: {type: string}
+      tool_id: {type: string}
+      verb: {type: string}
+      resource: {type: string}
+      result_hash: {type: string}
+      execution_report_hash: {type: string}
+  governance_verdict:
+    type: object
+    required: [kind, version, meta, decision, policy, signatures]
+  execution_report:
+    type: object
+    required: [kind, version, meta, executor, action, outcome, timestamps, hashes]
+  attestations:
+    type: object
+    additionalProperties: false
+    required: [executor]
+    properties:
+      executor:
+        type: object
+        additionalProperties: false
+        required: [service, instance_id, algorithm, signature]
+        properties:
+          service: {const: whalez-executor}
+          instance_id: {type: string}
+          algorithm: {const: hmac-sha256}
+          signature: {type: string}
+  enterprise:
+    type: object
+    additionalProperties: false
+    properties:
+      receipt_id: {type: string}
+      journal_entry_id: {type: string}
+      workflow_id: {type: string}
+  settlement:
+    type: object
+    additionalProperties: false
+    properties:
+      network: {type: string}
+      transaction_id: {type: string}
+      settlement_hash: {type: string}
+  verification:
+    type: object
+    additionalProperties: false
+    required: [certificate_hash]
+    properties:
+      certificate_hash: {type: string}
+      verified_at: {type: string, format: date-time}
