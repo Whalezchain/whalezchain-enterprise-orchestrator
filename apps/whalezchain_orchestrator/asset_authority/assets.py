@@ -6,14 +6,17 @@ from typing import Dict
 ASSET_REGISTRY: Dict[str, Dict[str, str]] = {
     "PTN": {
         "canonical_asset_name": "Plutonium",
+        "identity_status": "CANONICAL",
         "asset_role_class": "platform_trade_note",
     },
     "PRN": {
         "canonical_asset_name": "Plutoranium",
+        "identity_status": "CANONICAL",
         "asset_role_class": "platform_receipt_note",
     },
     "WHZ": {
-        "canonical_asset_name": "Whalez Mint",
+        "canonical_asset_name": "Whalez-Mint",
+        "identity_status": "CANONICAL",
         "asset_role_class": "ecosystem_policy_unit",
     },
 }
