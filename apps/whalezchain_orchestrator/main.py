@@ -18,6 +18,12 @@ from .mainnet.external_settlement import (
     prepare_external_settlement,
     finalize_external_settlement,
 )
+from .mainnet.chain_store import MainnetChainStore, ChainStoreError
+from .mainnet.settlement_bond import (
+    SettlementBondStateError,
+    get_settlement_bond_state,
+)
+from pathlib import Path
 
 
 # Load canonical execution registrations before serving requests.
@@ -91,6 +97,60 @@ def testnet_transfer(
 def debug_state():
     from .whalezchain_testnet_engine.runtime import engine
     return engine.state()
+
+
+@app.get("/mainnet/settlement/account/{account_id:path}/settlement-bond")
+def mainnet_settlement_bond_state(
+    account_id: str,
+    required_whz: str | None = None,
+    x_whalez_chain_token: str | None = Header(default=None),
+    x_whalez_correlation_id: str | None = Header(default=None),
+):
+    _require_mainnet_token(x_whalez_chain_token)
+
+    if not x_whalez_correlation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="correlation_id_required",
+        )
+    if not required_whz:
+        raise HTTPException(
+            status_code=400,
+            detail="required_whz_required",
+        )
+
+    configured = os.getenv("WHALEZCHAIN_MAINNET_STORE_PATH", "").strip()
+    store_path = (
+        Path(configured)
+        if configured
+        else Path("data") / "whalezchain-mainnet"
+    )
+
+    try:
+        store = MainnetChainStore(store_path)
+        verification = store.verify_chain()
+        economic_state = store._replay_economic_state()
+        head = store.finalized_head()
+        result = get_settlement_bond_state(
+            economic_state,
+            account_id=account_id,
+            correlation_id=x_whalez_correlation_id,
+            required_whz=required_whz,
+            chain_id=store.chain_id,
+            finalized_head=head,
+        )
+        result["chain_verification"] = verification
+        return result
+    except SettlementBondStateError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=str(exc),
+        ) from exc
+    except ChainStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="canonical_chain_state_unavailable",
+        ) from exc
 
 
 @app.post("/mainnet/settlement/prepare")
