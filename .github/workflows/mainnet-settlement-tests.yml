@@ -28,4 +28,6 @@ jobs:
             apps/whalezchain_orchestrator/tests/test_settlement_bond.py \
             apps/whalezchain_orchestrator/tests/test_http_boundary.py \
             apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_economic_root.py \
-            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_persistence.py
+            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_persistence.py \
+            apps/whalezchain_orchestrator/tests/test_mainnet_state_transition.py \
+            apps/whalezchain_orchestrator/tests/test_mainnet_balance_conservation.py
