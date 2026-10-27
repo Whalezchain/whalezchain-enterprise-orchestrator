@@ -122,7 +122,8 @@ class MainnetStateTransition:
 
             sender = working_state.get(tx.sender)
 
-            sender_balance = None
+            # A missing sender owns zero units. Never omit the balance check.
+            sender_balance = Decimal("0")
             if sender is not None:
                 sender_balance = _decimal(
                     sender.get(
@@ -166,6 +167,10 @@ class MainnetStateTransition:
                 # WhalezChain. This native attestation commits the policy
                 # derived WHZ assurance without transferring a tradable
                 # balance. Economic state locking is applied by ChainStore.
+                pass
+            elif tx.transaction_type == "transfer" and tx.sender == tx.recipient:
+                # Authentication and sufficient-balance checks already ran.
+                # Debiting and crediting the same mapping must preserve supply.
                 pass
             else:
                 recipient = working_state.setdefault(
