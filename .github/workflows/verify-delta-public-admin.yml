@@ -61,3 +61,67 @@ jobs:
       - name: Build public Next.js app without deployment credentials
         run: npm run build
 
+
+  privacy-containment:
+    name: Public Founder/Mail route containment (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out exact public privacy PR source
+        uses: actions/checkout@v4
+        with:
+          repository: deltaalpha-trade-pro/delta-public-beta
+          ref: e599527b12147100b3a6dceaf949d37dfb03f6a8
+          persist-credentials: false
+      - name: Check out verified dependency lockfile in temporary subfolder
+        uses: actions/checkout@v4
+        with:
+          repository: deltaalpha-trade-pro/delta-public-beta
+          ref: cbc448afea2bf9be2d205dd689f4dccc7ed3f756
+          path: lock-source
+          persist-credentials: false
+      - name: Verify same package manifest, use verified lockfile only for this CI run
+        run: |
+          cmp package.json lock-source/package.json
+          cp lock-source/package-lock.json package-lock.json
+          rm -rf lock-source
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run clean install
+        run: npm ci --no-audit --no-fund
+      - name: Build privacy containment patch
+        run: npm run build
+      - name: Verify HTTP 404 on private public-site routes
+        run: |
+          node - <<'NODE'
+          const { spawn } = require("node:child_process");
+          const http = require("node:http");
+          const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", "4389"], {
+            env: { ...process.env, PORT: "4389", NODE_ENV: "production" },
+            stdio: "ignore",
+          });
+          const probe = (path) => new Promise((resolve, reject) => {
+            const req = http.get("http://127.0.0.1:4389" + path, (res) => {
+              res.resume();
+              resolve(res.statusCode);
+            });
+            req.on("error", reject);
+            req.setTimeout(2000, () => req.destroy(new Error("timeout")));
+          });
+          (async () => {
+            try {
+              for (let n = 0; n < 20; n++) {
+                try { if (await probe("/") === 200) break; } catch {}
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+              for (const path of ["/founder-console", "/mail", "/founder", "/internal/founder"]) {
+                const code = await probe(path);
+                if (code !== 404) throw new Error(path + " returned HTTP " + code + " instead of 404");
+                console.log("PRIVATE_PUBLIC_ROUTE_BLOCKED", path, code);
+              }
+              console.log("PRIVACY_CONTAINMENT_OK");
+            } finally { server.kill(); }
+          })().catch(e => { console.error(e.message); process.exitCode = 1; });
+          NODE
