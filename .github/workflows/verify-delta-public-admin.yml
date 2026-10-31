@@ -60,3 +60,38 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build public Next.js app without deployment credentials
         run: npm run build
+
+  reconstruct-lockfile:
+    name: Reconstruct lockfile in isolated Ubuntu (diagnostic only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out pinned PUBLIC DeltaAlpha source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DELTA_SOURCE_REPO }}
+          ref: ${{ env.DELTA_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Reconstruct package-lock only without executing dependency scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Validate clean install from repaired lockfile
+        run: npm ci --no-audit --no-fund
+      - name: Run Admin and Tidio security tests
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts
+      - name: Build the public Next.js application
+        run: npm run build
+      - name: Compute provenance of proposed lockfile
+        run: sha256sum package.json package-lock.json > lockfile-provenance.sha256
+      - name: Archive verified lockfile for manual review (not committed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-admin-lockfile-review
+          path: |
+            package-lock.json
+            lockfile-provenance.sha256
+          retention-days: 3
+          if-no-files-found: error
