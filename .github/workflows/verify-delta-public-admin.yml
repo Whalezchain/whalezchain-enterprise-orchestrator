@@ -18,7 +18,7 @@ concurrency:
 
 env:
   DELTA_SOURCE_REPO: deltaalpha-trade-pro/delta-public-beta
-  DELTA_SOURCE_SHA: cbc448afea2bf9be2d205dd689f4dccc7ed3f756
+  DELTA_SOURCE_SHA: 947e50f1a3b1f7ba9dc27b1cf08daa8f91c33d0e
 
 jobs:
   admin-security-tests:
@@ -39,7 +39,7 @@ jobs:
       - name: Install exact locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Test Admin host, role, MFA and Tidio signature denials
-        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts tests/admin-console-routing.test.ts
 
   public-next-build:
     name: DeltaAlpha public Next.js build (no deploy)
@@ -126,37 +126,3 @@ jobs:
           })().catch(e => { console.error(e.message); process.exitCode = 1; });
           NODE
 
-  admin-access-jwt-mfa-diagnostic:
-    name: Verify strict Admin Access JWT and Runplane identity contract (no deploy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out exact NEW Admin MFA review commit
-        uses: actions/checkout@v4
-        with:
-          repository: deltaalpha-trade-pro/delta-public-beta
-          ref: 665fca17bc6bce4928d7b8b01e813e60ce7ffee2
-          persist-credentials: false
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Regenerate lockfile without executing dependency scripts in ephemeral CI
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Reproducible clean install
-        run: npm ci --no-audit --no-fund
-      - name: Run Administrator, Access-identity and Tidio signature tests
-        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts tests/admin-console-routing.test.ts
-      - name: Build Next.js app with fail-closed defaults
-        run: npm run build
-      - name: Hash reviewed dependency manifests
-        run: sha256sum package.json package-lock.json > lockfile-provenance.sha256
-      - name: Archive verified new JWT dependency lockfile for code review
-        uses: actions/upload-artifact@v4
-        with:
-          name: delta-admin-mfa-lockfile-review
-          path: |
-            package-lock.json
-            lockfile-provenance.sha256
-          retention-days: 3
-          if-no-files-found: error
