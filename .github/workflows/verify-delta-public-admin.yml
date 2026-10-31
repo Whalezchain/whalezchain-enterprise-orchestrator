@@ -135,7 +135,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: deltaalpha-trade-pro/delta-public-beta
-          ref: 55c305ab48be0d52bb16fc37ff5514366fd93d5c
+          ref: 665fca17bc6bce4928d7b8b01e813e60ce7ffee2
           persist-credentials: false
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
@@ -146,7 +146,7 @@ jobs:
       - name: Reproducible clean install
         run: npm ci --no-audit --no-fund
       - name: Run Administrator, Access-identity and Tidio signature tests
-        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts tests/admin-console-routing.test.ts
       - name: Build Next.js app with fail-closed defaults
         run: npm run build
       - name: Hash reviewed dependency manifests
