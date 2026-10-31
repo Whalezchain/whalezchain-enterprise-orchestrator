@@ -125,3 +125,38 @@ jobs:
             } finally { server.kill(); }
           })().catch(e => { console.error(e.message); process.exitCode = 1; });
           NODE
+
+  admin-access-jwt-mfa-diagnostic:
+    name: Verify strict Admin Access JWT and Runplane identity contract (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact NEW Admin MFA review commit
+        uses: actions/checkout@v4
+        with:
+          repository: deltaalpha-trade-pro/delta-public-beta
+          ref: 55c305ab48be0d52bb16fc37ff5514366fd93d5c
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Regenerate lockfile without executing dependency scripts in ephemeral CI
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Reproducible clean install
+        run: npm ci --no-audit --no-fund
+      - name: Run Administrator, Access-identity and Tidio signature tests
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts
+      - name: Build Next.js app with fail-closed defaults
+        run: npm run build
+      - name: Hash reviewed dependency manifests
+        run: sha256sum package.json package-lock.json > lockfile-provenance.sha256
+      - name: Archive verified new JWT dependency lockfile for code review
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-admin-mfa-lockfile-review
+          path: |
+            package-lock.json
+            lockfile-provenance.sha256
+          retention-days: 3
+          if-no-files-found: error
