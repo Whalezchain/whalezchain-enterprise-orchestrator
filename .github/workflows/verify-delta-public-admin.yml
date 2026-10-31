@@ -1,0 +1,62 @@
+# CI-only independent validation of the PUBLIC DeltaAlpha Admin PR.
+# This workflow runs in an ephemeral standard GitHub-hosted runner of this PUBLIC repo.
+# No private repository checkout, paid cloud provisioning, deployment or secrets.
+name: DeltaAlpha Admin — Cross-Account Verification (No Deploy)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/verify-delta-public-admin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delta-admin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DELTA_SOURCE_REPO: deltaalpha-trade-pro/delta-public-beta
+  DELTA_SOURCE_SHA: 4ec7f5527404eb3fd79fb810adfb7085487f8dbd
+
+jobs:
+  admin-security-tests:
+    name: Admin policy + Tidio signature tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact PUBLIC DeltaAlpha PR commit (no credentials persisted)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DELTA_SOURCE_REPO }}
+          ref: ${{ env.DELTA_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Set up clean Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install exact locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Test Admin host, role, MFA and Tidio signature denials
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts
+
+  public-next-build:
+    name: DeltaAlpha public Next.js build (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out exact PUBLIC DeltaAlpha PR commit (no credentials persisted)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DELTA_SOURCE_REPO }}
+          ref: ${{ env.DELTA_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Set up clean Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install exact locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build public Next.js app without deployment credentials
+        run: npm run build
