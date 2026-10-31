@@ -60,6 +60,45 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build public Next.js app without deployment credentials
         run: npm run build
+      - name: Verify exact Admin hostname and denied unauthenticated routes
+        run: |
+          node - <<'NODE'
+          const { spawn } = require("node:child_process");
+          const http = require("node:http");
+          const processServer = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", "4391"], { stdio: "ignore" });
+          const request = (host, path) => new Promise((resolve, reject) => {
+            const req = http.get({ hostname: "127.0.0.1", port: 4391, path, headers: { Host: host } }, res => {
+              res.resume(); resolve(res.statusCode);
+            });
+            req.on("error", reject);
+            req.setTimeout(2000, () => req.destroy(new Error("timeout")));
+          });
+          (async () => {
+            try {
+              let ready = false;
+              for (let i = 0; i < 20; i++) {
+                try { ready = (await request("www.deltaalpha-trade-pro.com", "/")) === 200; } catch {}
+                if (ready) break;
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+              if (!ready) throw new Error("public homepage failed to start");
+              const checks = [
+                ["www.deltaalpha-trade-pro.com", "/", 200],
+                ["www.deltaalpha-trade-pro.com", "/admin-control", 404],
+                ["console.deltaalpha-trade-pro.com", "/", 404],
+                ["console.deltaalpha-trade-pro.com", "/admin-control", 404],
+                ["console.deltaalpha-trade-pro.com", "/api/admin/overview", 404],
+                ["console.deltaalpha-trade-pro.com", "/mail", 404],
+                ["founder-console-eight.vercel.app", "/admin-control", 404],
+              ];
+              for (const [host, path, expected] of checks) {
+                const actual = await request(host, path);
+                if (actual !== expected) throw new Error(host + path + ": expected " + expected + ", got " + actual);
+                console.log("DENY_BY_DEFAULT_VERIFIED", host, path, actual);
+              }
+            } finally { processServer.kill(); }
+          })().catch(e => { console.error(e.message); process.exitCode = 1; });
+          NODE
 
 
   privacy-containment:
