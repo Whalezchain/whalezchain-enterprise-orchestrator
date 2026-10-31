@@ -18,7 +18,7 @@ concurrency:
 
 env:
   DELTA_SOURCE_REPO: deltaalpha-trade-pro/delta-public-beta
-  DELTA_SOURCE_SHA: 947e50f1a3b1f7ba9dc27b1cf08daa8f91c33d0e
+  DELTA_SOURCE_SHA: bff6d60616d45d603746a2be0666f02a0af677c6
 
 jobs:
   admin-security-tests:
@@ -39,7 +39,7 @@ jobs:
       - name: Install exact locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Test Admin host, role, MFA and Tidio signature denials
-        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts tests/admin-console-routing.test.ts
+        run: npx --no-install tsx --test tests/admin-console-policy.test.ts tests/admin-tidio-relay-boundary.test.ts tests/admin-cloudflare-access-policy.test.ts tests/admin-console-routing.test.ts tests/admin-mail-identity.test.ts
 
   public-next-build:
     name: DeltaAlpha public Next.js build (no deploy)
