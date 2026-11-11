@@ -1,0 +1,58 @@
+name: Reusable API contract tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version supported by the API project.
+        required: false
+        default: "3.12"
+        type: string
+      working-directory:
+        description: Caller repository directory containing the API project.
+        required: true
+        type: string
+      install-command:
+        description: API test dependencies to install; no secrets are passed to this workflow.
+        required: true
+        type: string
+      contract-test-command:
+        description: Local API contract/integration test command (no live endpoints or production credentials).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install API test dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: bash -euo pipefail -c "$INSTALL_COMMAND"
+      - name: Run local API contract tests
+        env:
+          CONTRACT_TEST_COMMAND: ${{ inputs.contract-test-command }}
+          NO_EXTERNAL_NETWORK: "1"
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: bash -euo pipefail -c "$CONTRACT_TEST_COMMAND"

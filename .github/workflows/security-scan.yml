@@ -1,0 +1,84 @@
+name: Reusable security scanning
+
+on:
+  workflow_call:
+    inputs:
+      codeql-languages:
+        description: Comma-separated CodeQL languages. Empty disables CodeQL while filesystem scanning still runs.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-filesystem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "Trivy scanned caller $GITHUB_REPOSITORY at $actual" >> "$GITHUB_STEP_SUMMARY"
+      - name: Run pinned Trivy filesystem scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          scan-type: fs
+          scan-ref: .
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "1"
+      - name: Archive Trivy SARIF report
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trivy-sarif-${{ github.run_id }}
+          path: trivy-results.sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  codeql:
+    if: ${{ inputs.codeql-languages != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "CodeQL analyzed caller $GITHUB_REPOSITORY at $actual" >> "$GITHUB_STEP_SUMMARY"
+      - name: Initialize CodeQL v3
+        uses: github/codeql-action/init@9418214df1f2c4b8128c770156c409013b07d6b9
+        with:
+          languages: ${{ inputs.codeql-languages }}
+      - name: Analyze caller source with CodeQL v3
+        uses: github/codeql-action/analyze@9418214df1f2c4b8128c770156c409013b07d6b9
+        with:
+          # Fork pull requests still get analysis, but never attempt code-scanning upload.
+          upload: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'never' || 'always' }}
+          upload-database: false

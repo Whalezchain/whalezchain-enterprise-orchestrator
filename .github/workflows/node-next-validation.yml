@@ -1,0 +1,87 @@
+name: Reusable Node and Next.js validation
+
+on:
+  workflow_call:
+    inputs:
+      project-directory:
+        description: Caller repository directory containing package.json and package-lock.json.
+        required: true
+        type: string
+      node-version:
+        description: Node.js version supported by this project.
+        required: false
+        default: "20"
+        type: string
+      build-command:
+        description: Caller-specific build command; runs without secrets and with contents read only.
+        required: true
+        type: string
+      test-command:
+        description: Optional caller-specific test command.
+        required: false
+        default: ""
+        type: string
+    outputs:
+      tested-repository:
+        description: Repository whose source was checked out and built.
+        value: ${{ jobs.validate.outputs.repository }}
+      tested-sha:
+        description: Exact caller source revision tested.
+        value: ${{ jobs.validate.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      repository: ${{ steps.source.outputs.repository }}
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "repository=$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Node/Next validation source"
+            echo "- Repository: $GITHUB_REPOSITORY"
+            echo "- Expected SHA: $GITHUB_SHA"
+            echo "- Checked out SHA: $actual"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ format('{0}/package-lock.json', inputs.project-directory) }}
+      - name: Install locked dependencies
+        working-directory: ${{ inputs.project-directory }}
+        run: npm ci
+      - name: Run caller tests
+        if: ${{ inputs.test-command != '' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        run: bash -euo pipefail -c "$TEST_COMMAND"
+      - name: Build caller application
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        run: bash -euo pipefail -c "$BUILD_COMMAND"
