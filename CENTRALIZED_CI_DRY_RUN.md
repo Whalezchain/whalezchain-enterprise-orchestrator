@@ -23,7 +23,7 @@ For controlled adoption, move generic reusable workflows into a dedicated CI-onl
 - pull_request, push-to-pilot-branch, and manual test triggers only; no pull_request_target.
 - Checkout explicitly names github.repository and github.sha, then asserts git rev-parse HEAD == GITHUB_SHA.
 - Test and build commands run with contents: read and no secrets.
-- CodeQL gets security-events: write only in its own job. Fork PR analysis disables SARIF upload. Trivy output is an expiring artifact.
+- CodeQL and Trivy run with contents: read only. CodeQL SARIF and Trivy SARIF are retained as seven-day artifacts; CodeQL does not upload into code scanning, which avoids collision with repositories using default CodeQL setup. A repository that wants code-scanning publication must separately adopt and validate advanced setup with the required permission.
 - SBOM and execution evidence are non-production artifacts; no signing identity or deployment permission is present.
 
 ## Pilot workflow references

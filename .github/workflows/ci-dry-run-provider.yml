@@ -24,7 +24,6 @@ jobs:
     uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/security-scan.yml@63bc0c2ae219ed139ca578ca0a36162ae32bad8a
     permissions:
       contents: read
-      security-events: write
     with:
       codeql-languages: "python,actions"
 
