@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
 
 from ..asset_authority import ASSET_REGISTRY
 from .issuance_policy import PRNIssuancePolicy
@@ -91,12 +91,17 @@ class MainnetStateTransition:
         chain_id: str,
         known_tx_hashes: Iterable[str] = (),
         issuance_policy: PRNIssuancePolicy | None = None,
+        expected_nonces: Mapping[str, int] | None = None,
     ) -> Dict[str, Any]:
 
         working_state = deepcopy(initial_state)
 
         committed_hashes = set(known_tx_hashes)
         block_hashes: set[str] = set()
+        # When a canonical nonce snapshot is supplied, enforce each sender's
+        # next nonce across the complete ordered transaction batch.
+        next_nonces = dict(expected_nonces or {})
+        enforce_nonces = expected_nonces is not None
 
         transitions = []
 
@@ -122,14 +127,14 @@ class MainnetStateTransition:
 
             sender = working_state.get(tx.sender)
 
-            sender_balance = None
-            if sender is not None:
-                sender_balance = _decimal(
-                    sender.get(
-                        tx.asset_symbol,
-                        "0.00000000",
-                    )
-                )
+            # Mainnet transfers from an account absent from state have zero
+            # balance, not an unchecked missing balance.
+            sender_balance = _decimal(
+                sender.get(tx.asset_symbol, "0.00000000")
+                if sender is not None
+                else "0.00000000"
+            )
+            expected_nonce = next_nonces.get(tx.sender, 0) if enforce_nonces else None
 
             current_prn_supply = sum(
                 (
@@ -150,6 +155,7 @@ class MainnetStateTransition:
                 tx,
                 expected_chain_id=chain_id,
                 known_tx_hashes=committed_hashes,
+                expected_nonce=expected_nonce,
                 sender_balance=sender_balance,
                 issuance_policy=issuance_policy,
                 current_prn_supply=current_prn_supply,
@@ -166,6 +172,10 @@ class MainnetStateTransition:
                 # WhalezChain. This native attestation commits the policy
                 # derived WHZ assurance without transferring a tradable
                 # balance. Economic state locking is applied by ChainStore.
+                pass
+            elif tx.transaction_type == "transfer" and tx.sender == tx.recipient:
+                # Authentication and sufficient-balance checks already ran.
+                # Debiting and crediting the same mapping must preserve supply.
                 pass
             else:
                 recipient = working_state.setdefault(
@@ -234,6 +244,8 @@ class MainnetStateTransition:
             })
 
             block_hashes.add(tx_hash)
+            if enforce_nonces:
+                next_nonces[tx.sender] = int(expected_nonce or 0) + 1
 
         return {
             "state": deepcopy(working_state),
