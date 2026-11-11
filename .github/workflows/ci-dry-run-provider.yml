@@ -16,26 +16,26 @@ permissions:
 
 jobs:
   chain-tests:
-    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/whalezchain-dry-run.yml@231e541c0dc1420effb99b8727bd1a1714671b1b
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/whalezchain-dry-run.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
     permissions:
       contents: read
 
   security:
-    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/security-scan.yml@231e541c0dc1420effb99b8727bd1a1714671b1b
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/security-scan.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
     permissions:
       contents: read
     with:
       codeql-languages: "python,actions"
 
   governance:
-    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/governance-policy.yml@231e541c0dc1420effb99b8727bd1a1714671b1b
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/governance-policy.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
     permissions:
       contents: read
     with:
-      provider-ref: 231e541c0dc1420effb99b8727bd1a1714671b1b
+      provider-ref: b7993b87a80d8a057fb3b0b72b7ae106fc0da796
 
   evidence:
-    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/sbom-evidence.yml@231e541c0dc1420effb99b8727bd1a1714671b1b
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/sbom-evidence.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
     permissions:
       contents: read
     with:
@@ -43,7 +43,7 @@ jobs:
 
   release-verification:
     needs: [chain-tests, security, governance, evidence]
-    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/nonproduction-release-verification.yml@231e541c0dc1420effb99b8727bd1a1714671b1b
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/nonproduction-release-verification.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
     permissions:
       contents: read
     with:
