@@ -18,6 +18,7 @@ from .finalization_authorization import (
     MainnetFinalizationAuthorization,
 )
 from .genesis_economic_state import economic_state_root
+from .approval_preflight import ApprovalPreflightError, require_atomic_financial_release
 from .transaction import MainnetTransaction, sha256_hex
 
 
@@ -451,9 +452,59 @@ def prepare_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def preflight_external_settlement_approval(payload: dict[str, Any]) -> dict[str, Any]:
+    """Verify an independently signed approval against a reconstructed candidate.
+
+    No block is finalized, nonce consumed, settlement committed, or funds moved.
+    The canonical candidate is derived here, rather than trusting caller-supplied
+    execution details. A missing trust-context file fails closed.
+    """
+    from .approval_preflight import preflight_signed_settlement
+
+    if not isinstance(payload, dict):
+        raise ExternalSettlementError("preflight_payload_invalid")
+    settlement = _build_request(payload)
+    approval_id = str(payload.get("approval_id", "")).strip()
+    raw_receipt = payload.get("signed_approval_receipt_json")
+    if not isinstance(raw_receipt, str):
+        raise ExternalSettlementError("signed_approval_receipt_required")
+    supplied_block = payload.get("block")
+    supplied_finalization = payload.get("finalization_payload")
+    if not isinstance(supplied_block, dict) or not isinstance(supplied_finalization, dict):
+        raise ExternalSettlementError("candidate_for_approval_preflight_required")
+    store = MainnetChainStore(_store_path())
+    try:
+        store.verify_chain()
+        candidate = _build_candidate(
+            store, settlement, approval_id=approval_id,
+            timestamp=str(supplied_block.get("timestamp") or ""),
+        )
+        if candidate["block"] != supplied_block:
+            raise ExternalSettlementError("candidate_block_changed")
+        if candidate["finalization_payload"] != supplied_finalization:
+            raise ExternalSettlementError("finalization_payload_changed")
+        return preflight_signed_settlement(
+            signed_receipt_json=raw_receipt,
+            expected_approval_id=approval_id,
+            expected_chain_id=store.chain_id,
+            finalization_payload=candidate["finalization_payload"],
+            settlement=settlement.canonical_dict(),
+        )
+    except (ApprovalPreflightError, ChainStoreError) as exc:
+        raise ExternalSettlementError("approval_provenance_or_canonical_state_unavailable") from exc
+
+
 def finalize_external_settlement(payload: dict[str, Any]) -> dict[str, Any]:
     if os.getenv("WHALEZCHAIN_MAINNET_EXECUTION_ENABLED", "").lower() != "true":
         raise ExternalSettlementError("mainnet_not_live")
+
+    # This native gate is mandatory and cannot be bypassed with an env flag.
+    # A signed approval preflight is not atomic nonce consumption, custody,
+    # independent validator finality or a release authorization.
+    try:
+        require_atomic_financial_release()
+    except ApprovalPreflightError as exc:
+        raise ExternalSettlementError(str(exc)) from exc
 
     settlement = _build_request(payload)
     store = MainnetChainStore(_store_path())
