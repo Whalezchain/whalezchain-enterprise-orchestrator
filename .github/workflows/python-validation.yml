@@ -1,0 +1,84 @@
+name: Reusable Python validation
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Caller repository directory containing the Python project.
+        required: true
+        type: string
+      python-version:
+        description: Python interpreter version for this project.
+        required: false
+        default: "3.12"
+        type: string
+      install-command:
+        description: Caller-specific dependency installation command; runs without secrets and with contents read only.
+        required: true
+        type: string
+      test-command:
+        description: Caller-specific test command; runs without secrets and with contents read only.
+        required: true
+        type: string
+    outputs:
+      tested-repository:
+        description: Repository whose source was checked out and tested.
+        value: ${{ jobs.validate.outputs.repository }}
+      tested-sha:
+        description: Exact caller source revision tested.
+        value: ${{ jobs.validate.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      repository: ${{ steps.source.outputs.repository }}
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          test "$actual" = "$GITHUB_SHA"
+          echo "repository=$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Python validation source"
+            echo "- Repository: $GITHUB_REPOSITORY"
+            echo "- Expected SHA: $GITHUB_SHA"
+            echo "- Checked out SHA: $actual"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install caller dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -euo pipefail -c "$INSTALL_COMMAND"
+      - name: Run caller tests
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -euo pipefail -c "$TEST_COMMAND"

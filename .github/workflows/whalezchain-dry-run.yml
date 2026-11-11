@@ -1,0 +1,46 @@
+name: Reusable WhalezChain non-production checks
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version for WhalezChain tests.
+        required: false
+        default: "3.12"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  chain-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      PYTHONPATH: ".:./apps"
+      WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install isolated test dependencies
+        run: python -m pip install --disable-pip-version-check -r apps/whalezchain_orchestrator/requirements.txt pytest httpx
+      - name: Run settlement, HTTP-boundary, economic-root, and persistence tests
+        run: |
+          python -m pytest -q \
+            apps/whalezchain_orchestrator/tests/test_external_settlement.py \
+            apps/whalezchain_orchestrator/tests/test_settlement_bond.py \
+            apps/whalezchain_orchestrator/tests/test_http_boundary.py \
+            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_economic_root.py \
+            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_persistence.py

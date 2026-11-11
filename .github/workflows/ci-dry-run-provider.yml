@@ -1,0 +1,51 @@
+name: Central CI dry-run (WhalezChain provider)
+
+on:
+  push:
+    branches:
+      - "codex/centralized-ci-dry-run-*"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "apps/whalezchain_orchestrator/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chain-tests:
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/whalezchain-dry-run.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+    permissions:
+      contents: read
+
+  security:
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/security-scan.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+    permissions:
+      contents: read
+    with:
+      codeql-languages: "python,actions"
+
+  governance:
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/governance-policy.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+    permissions:
+      contents: read
+    with:
+      provider-ref: b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+
+  evidence:
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/sbom-evidence.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+    permissions:
+      contents: read
+    with:
+      evidence-label: whalezchain-ci-dry-run
+
+  release-verification:
+    needs: [chain-tests, security, governance, evidence]
+    uses: Whalezchain/whalezchain-enterprise-orchestrator/.github/workflows/nonproduction-release-verification.yml@b7993b87a80d8a057fb3b0b72b7ae106fc0da796
+    permissions:
+      contents: read
+    with:
+      evidence-label: whalezchain-ci-dry-run
+      required-workflow-names: "chain-tests,security,governance,evidence"

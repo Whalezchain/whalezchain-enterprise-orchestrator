@@ -1,0 +1,44 @@
+name: Reusable workflow governance policy
+
+on:
+  workflow_call:
+    inputs:
+      provider-ref:
+        description: Full commit SHA of this reusable workflow provider, also used to check out its policy validator.
+        required: true
+        type: string
+      candidate-workflow-glob:
+        description: Glob of caller-owned workflows to validate.
+        required: false
+        default: .github/workflows/ci-dry-run-*.yml
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository and revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify caller checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Checkout pinned policy validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Whalezchain/whalezchain-enterprise-orchestrator
+          ref: ${{ inputs.provider-ref }}
+          path: .ci-provider
+          persist-credentials: false
+      - name: Validate caller workflow security policy
+        env:
+          CANDIDATE_WORKFLOW_GLOB: ${{ inputs.candidate-workflow-glob }}
+        run: python .ci-provider/scripts/ci/validate_workflow_policy.py
