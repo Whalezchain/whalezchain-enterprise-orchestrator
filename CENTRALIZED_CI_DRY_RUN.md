@@ -10,7 +10,7 @@ For controlled adoption, move generic reusable workflows into a dedicated CI-onl
 
 - Python validation with repository-specific install/test commands and a caller checkout/SHA assertion.
 - Node/Next validation using the caller's lockfile and build/test commands.
-- Trivy filesystem security scanning at the verified 0.35.0 commit and CodeQL v3 at a reviewed full SHA.
+- Trivy filesystem security scanning at the verified 0.35.0 commit and CodeQL v4 at a reviewed full SHA.
 - Governance-policy static checks for pinned references, explicit job permissions, and forbidden PR/secret/deployment patterns.
 - CycloneDX SBOM and non-production evidence artifacts with seven-day retention.
 - WhalezChain settlement/API/economic-root/persistence tests with mainnet execution explicitly disabled.
