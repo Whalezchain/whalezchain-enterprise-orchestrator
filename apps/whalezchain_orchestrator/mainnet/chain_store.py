@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import tempfile
+import fcntl
+from functools import wraps
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -10,8 +14,8 @@ from .state_transition import MainnetStateTransition, state_root
 from .genesis_economic_state import economic_state_root
 from .settlement import lock_whz_bond, release_whz_bond, slash_whz_bond
 from .transaction import MainnetTransaction, canonical_json, sha256_hex
-from .transaction_validator import MainnetTransactionValidator
-from .genesis import MainnetGenesis, verify_genesis
+from .issuance_policy import policy_from_authority_config
+from .genesis import MainnetGenesis, GenesisValidator, verify_genesis
 
 
 MAINNET_CHAIN_ID = "whalezchain-mainnet-v1"
@@ -19,6 +23,19 @@ MAINNET_CHAIN_ID = "whalezchain-mainnet-v1"
 
 class ChainStoreError(ValueError):
     pass
+
+
+def _serialized_write(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        # Independent descriptors make this an inter-process AND thread lock.
+        with (self.root / ".write.lock").open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return locked
 
 
 class MainnetChainStore:
@@ -52,6 +69,7 @@ class MainnetChainStore:
         self.blocks_dir.mkdir(parents=True, exist_ok=True)
         self.meta_dir.mkdir(parents=True, exist_ok=True)
 
+    @_serialized_write
     def initialize_genesis(self, genesis: MainnetGenesis) -> None:
         verify_genesis(genesis)
 
@@ -83,7 +101,39 @@ class MainnetChainStore:
     def load_genesis(self) -> dict[str, Any]:
         if not self.genesis_path.exists():
             raise ChainStoreError("canonical genesis is not initialized")
-        return self._read_json(self.genesis_path)
+        data = self._read_json(self.genesis_path)
+        genesis = MainnetGenesis(
+            chain_id=data["chain_id"], network_class=data["network_class"],
+            genesis_timestamp=data["genesis_timestamp"],
+            asset_registry=data["asset_registry"], initial_state=data["initial_state"],
+            economic_state=data["economic_state"], authority_config=data["authority_config"],
+            validator_config=tuple(GenesisValidator(v["validator_id"], v["public_key"])
+                                   for v in data["validator_config"]),
+            state_root=data["state_root"], genesis_hash=data["genesis_hash"],
+        )
+        verify_genesis(genesis)
+        if genesis.chain_id != self.chain_id or genesis.to_dict() != data:
+            raise ChainStoreError("canonical genesis identity or encoding mismatch")
+        return data
+
+    def _sender_nonce_state(self, through_height: int | None = None) -> dict[str, int]:
+        """Return next nonces after verifying finalized per-account nonce history."""
+        head = self.finalized_head()
+        final_height = int(head["height"]) if through_height is None else through_height
+        next_nonces: dict[str, int] = {}
+        for height in range(0, final_height + 1):
+            block = self._load_block(height)
+            for item in block.get("transactions", []):
+                sender = str(item["sender"])
+                try:
+                    nonce = int(item["nonce"])
+                except (TypeError, ValueError) as exc:
+                    raise ChainStoreError("canonical transaction nonce is invalid") from exc
+                expected_nonce = next_nonces.get(sender, 0)
+                if nonce != expected_nonce:
+                    raise ChainStoreError("canonical sender nonce sequence is not contiguous")
+                next_nonces[sender] = expected_nonce + 1
+        return next_nonces
 
     def finalized_head(self) -> dict[str, Any]:
         if not self.head_path.exists():
@@ -93,15 +143,20 @@ class MainnetChainStore:
     def committed(self, tx_hash: str) -> bool:
         return tx_hash in self._read_json(self.tx_index_path)
 
+    @_serialized_write
     def append_finalized_block(
         self,
         block: MainnetBlock,
         *,
         expected_state: Mapping[str, Mapping[str, str]],
     ) -> dict[str, Any]:
-        genesis = self.load_genesis()
+        canonical_state, canonical_head, canonical_index = self._scan_canonical()
         head = self.finalized_head()
         tx_index = self._read_json(self.tx_index_path)
+        if head != canonical_head or tx_index != canonical_index:
+            raise ChainStoreError("derived metadata mismatch; reconcile before append")
+        if state_root(dict(expected_state)) != canonical_head["state_root"]:
+            raise ChainStoreError("starting state does not match canonical finalized state")
 
         if block.chain_id != self.chain_id:
             raise ChainStoreError("block chain id mismatch")
@@ -114,7 +169,7 @@ class MainnetChainStore:
             raise ChainStoreError("previous block hash does not match finalized head")
 
         txs = tuple(block.transactions)
-        validator = MainnetTransactionValidator()
+        issuance_policy = policy_from_authority_config(self.load_genesis()["authority_config"])
 
         seen: set[str] = set()
         for tx in txs:
@@ -127,13 +182,9 @@ class MainnetChainStore:
             if tx.tx_hash in tx_index:
                 raise ChainStoreError("transaction replay detected")
 
-            validator.validate(
-                tx,
-                expected_chain_id=self.chain_id,
-                known_tx_hashes=tx_index.keys(),
-            )
             seen.add(tx.tx_hash)
 
+        starting_nonces = self._sender_nonce_state()
         expected_economic_state = self._replay_economic_state()
 
         expected_economic_state = self._economic_state_after_transactions(
@@ -147,10 +198,12 @@ class MainnetChainStore:
             raise ChainStoreError("block economic state root mismatch")
 
         transition = MainnetStateTransition().apply(
-            dict(expected_state),
+            canonical_state,
             list(txs),
             chain_id=self.chain_id,
             known_tx_hashes=tuple(tx_index.keys()),
+            issuance_policy=issuance_policy,
+            expected_nonces=starting_nonces,
         )
 
         if transition["state_root"] != block.resulting_state_root:
@@ -201,259 +254,93 @@ class MainnetChainStore:
         return new_head
 
     def replay_state(self) -> dict[str, dict[str, str]]:
-        genesis = self.load_genesis()
-        state = {
-            account: dict(balances)
-            for account, balances in genesis["initial_state"].items()
-        }
-        economic_state = {
-            **genesis["economic_state"],
-            "accounts": {
-                account_id: dict(account)
-                for account_id, account in genesis["economic_state"]["accounts"].items()
-            },
-        }
-
-        head = self.finalized_head()
-        height = int(head["height"])
-        known_tx_hashes: set[str] = set()
-
-        for block_height in range(0, height + 1):
-            block = self._load_block(block_height)
-            txs = tuple(
-                self._transaction_from_dict(item)
-                for item in block["transactions"]
-            )
-
-            transition = MainnetStateTransition().apply(
-                state,
-                list(txs),
-                chain_id=self.chain_id,
-                known_tx_hashes=tuple(known_tx_hashes),
-            )
-            state = transition["state"]
-
-            economic_state = self._economic_state_after_transactions(
-                economic_state,
-                txs,
-            )
-
-            expected_economic_root = economic_state_root(economic_state)
-            if block["economic_state_root"] != expected_economic_root:
-                raise ChainStoreError(
-                    f"economic state root mismatch at height {block_height}"
-                )
-
-            known_tx_hashes.update(tx.tx_hash for tx in txs)
-
-            if transition["state_root"] != block["resulting_state_root"]:
-                raise ChainStoreError(
-                    f"state replay mismatch at height {block_height}"
-                )
-
-        if state_root(state) != head["state_root"]:
-            raise ChainStoreError("finalized head state root mismatch")
-
-        if economic_state_root(economic_state) != head["economic_state_root"]:
-            raise ChainStoreError("finalized head economic state root mismatch")
-
+        state, head, index = self._scan_canonical()
+        self._verify_metadata(head, index)
         return state
 
-    def reconcile(self) -> dict[str, Any]:
-        """Validate canonical blocks and rebuild derived metadata.
+    @_serialized_write
+    def reconcile(self, *, expected_head: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Rebuild derived metadata only after validating ALL canonical files.
 
-        Block files are canonical. finalized_head.json and tx_index.json
-        are derived metadata and may be recreated after an interrupted write.
+        Historical state-root incompatibility is an error, never permission to
+        rewrite genesis or finalized blocks. Run recovery on a copy first.
         """
-        genesis = self.load_genesis()
-
-        head = self.finalized_head()
-
-        state = {
-            account: dict(balances)
-            for account, balances in genesis["initial_state"].items()
-        }
-        economic_state = {
-            **genesis["economic_state"],
-            "accounts": {
-                account_id: dict(account)
-                for account_id, account in genesis["economic_state"]["accounts"].items()
-            },
-        }
-
-        tx_index: dict[str, dict[str, Any]] = {}
-        known_tx_hashes: set[str] = set()
-        previous_hash = ""
-        height = 0
-
-        while True:
-            matches = sorted(self.blocks_dir.glob(f"{height:020d}-*.json"))
-            if not matches:
-                break
-            if len(matches) != 1:
-                raise ChainStoreError(
-                    f"expected exactly one canonical block at height {height}"
-                )
-
-            block = self._read_json(matches[0])
-
-            if block["chain_id"] != self.chain_id:
-                raise ChainStoreError(f"block chain id mismatch at height {height}")
-            if int(block["height"]) != height:
-                raise ChainStoreError(f"block height mismatch at height {height}")
-            if block["previous_block_hash"] != previous_hash:
-                raise ChainStoreError(
-                    f"previous hash mismatch at height {height}"
-                )
-
-            txs = tuple(
-                self._transaction_from_dict(item)
-                for item in block["transactions"]
-            )
-
-            if self._transaction_root(txs) != block["transaction_root"]:
-                raise ChainStoreError(
-                    f"transaction root mismatch at height {height}"
-                )
-
-            for tx in txs:
-                if tx.tx_hash in known_tx_hashes:
-                    raise ChainStoreError(
-                        f"duplicate transaction at height {height}: {tx.tx_hash}"
-                    )
-
-            transition = MainnetStateTransition().apply(
-                state,
-                list(txs),
-                chain_id=self.chain_id,
-                known_tx_hashes=tuple(known_tx_hashes),
-            )
-            state = transition["state"]
-
-            economic_state = self._economic_state_after_transactions(
-                economic_state,
-                txs,
-            )
-
-            expected_economic_root = economic_state_root(economic_state)
-
-            if transition["state_root"] != block["resulting_state_root"]:
-                raise ChainStoreError(
-                    f"state replay mismatch at height {height}"
-                )
-
-            if block.get("economic_state_root") != expected_economic_root:
-                raise ChainStoreError(
-                    f"economic state root mismatch at height {height}"
-                )
-
-            unsigned_block = {
-                "chain_id": block["chain_id"],
-                "height": block["height"],
-                "previous_block_hash": block["previous_block_hash"],
-                "timestamp": block["timestamp"],
-                "transactions": [tx.unsigned_dict() for tx in txs],
-                "transaction_root": block["transaction_root"],
-                "resulting_state_root": block["resulting_state_root"],
-                "economic_state_root": block["economic_state_root"],
-                "proposer_id": block["proposer_id"],
-                "consensus_evidence": block["consensus_evidence"],
-            }
-
-            if sha256_hex(unsigned_block) != block["block_hash"]:
-                raise ChainStoreError(
-                    f"block hash mismatch at height {height}"
-                )
-
-            if dict(block["consensus_evidence"] or {}).get("finalized") is not True:
-                raise ChainStoreError(
-                    f"block lacks finalization evidence at height {height}"
-                )
-
-            for tx in txs:
-                tx_index[tx.tx_hash] = {
-                    "height": height,
-                    "block_hash": block["block_hash"],
-                }
-                known_tx_hashes.add(tx.tx_hash)
-
-            previous_hash = block["block_hash"]
-            height += 1
-
-        final_height = height - 1
-        final_state_root = state_root(state)
-
-        new_head = {
-            "height": final_height,
-            "block_hash": previous_hash,
-            "state_root": final_state_root,
-            "economic_state_root": economic_state_root(economic_state),
-        }
-
-        self._atomic_write_json(self.tx_index_path, tx_index)
-        self._atomic_write_json(self.head_path, new_head)
-
-        return {
-            "reconciled": True,
-            "height": final_height,
-            "block_hash": previous_hash,
-            "state_root": final_state_root,
-            "transactions_indexed": len(tx_index),
-        }
+        _, head, index = self._scan_canonical()
+        if expected_head is not None and dict(expected_head) != head:
+            raise ChainStoreError("recovery checkpoint mismatch")
+        if self.head_path.exists():
+            prior = self.finalized_head()
+            if int(prior["height"]) > head["height"]:
+                raise ChainStoreError("canonical blocks missing below recorded finalized head")
+        self._atomic_write_json(self.tx_index_path, index)
+        self._atomic_write_json(self.head_path, head)
+        return {"reconciled": True, **head, "transactions_indexed": len(index)}
 
     def verify_chain(self) -> dict[str, Any]:
-        self.replay_state()
+        _, head, index = self._scan_canonical()
+        self._verify_metadata(head, index)
+        return {"verified": True, **head, "blocks_checked": head["height"] + 1}
 
-        head = self.finalized_head()
-        checked = 0
+    def _verify_metadata(self, head: dict[str, Any], index: dict[str, Any]) -> None:
+        if self.finalized_head() != head:
+            raise ChainStoreError("finalized head mismatch with canonical replay")
+        if self._read_json(self.tx_index_path) != index:
+            raise ChainStoreError("transaction index mismatch with canonical replay")
 
+    def _scan_canonical(self):
+        """Read-only validation independent of head/index availability."""
+        genesis = self.load_genesis()
+        state = {account: dict(balances)
+                 for account, balances in genesis["initial_state"].items()}
+        economics = genesis["economic_state"]
+        issuance_policy = policy_from_authority_config(genesis["authority_config"])
+        index: dict[str, Any] = {}
         previous_hash = ""
-        for height in range(0, int(head["height"]) + 1):
-            block = self._load_block(height)
-
+        nonces: dict[str, int] = {}
+        files = sorted(self.blocks_dir.glob("*.json"))
+        for height, path in enumerate(files):
+            if not re.fullmatch(r"[0-9]{20}-[0-9a-f]{64}\.json", path.name):
+                raise ChainStoreError("invalid canonical block filename")
+            block = self._read_json(path)
+            if type(block["height"]) is not int or block["height"] != height:
+                raise ChainStoreError(f"canonical block gap or duplicate at height {height}")
+            if path.name != f"{height:020d}-{block['block_hash']}.json":
+                raise ChainStoreError(f"canonical block filename mismatch at height {height}")
+            if block["chain_id"] != self.chain_id:
+                raise ChainStoreError(f"block chain id mismatch at height {height}")
             if block["previous_block_hash"] != previous_hash:
-                raise ChainStoreError(
-                    f"previous hash mismatch at height {height}"
-                )
-
-            txs = tuple(
-                self._transaction_from_dict(item)
-                for item in block["transactions"]
-            )
-
-            unsigned_block = {
-                "chain_id": block["chain_id"],
-                "height": block["height"],
-                "previous_block_hash": block["previous_block_hash"],
-                "timestamp": block["timestamp"],
-                "transactions": [
-                    tx.unsigned_dict() for tx in txs
-                ],
-                "transaction_root": block["transaction_root"],
-                "resulting_state_root": block["resulting_state_root"],
-                "economic_state_root": block["economic_state_root"],
-                "proposer_id": block["proposer_id"],
-                "consensus_evidence": block["consensus_evidence"],
-            }
-
-            if sha256_hex(unsigned_block) != block["block_hash"]:
-                raise ChainStoreError(
-                    f"block hash mismatch at height {height}"
-                )
-
+                raise ChainStoreError(f"previous hash mismatch at height {height}")
+            txs = tuple(self._transaction_from_dict(item) for item in block["transactions"])
+            # The transition authenticates every transaction, rejects duplicate
+            # hashes and replays its financial effects from canonical genesis.
+            transition = MainnetStateTransition().apply(
+                state, txs, chain_id=self.chain_id, known_tx_hashes=tuple(index),
+                issuance_policy=issuance_policy, expected_nonces=nonces)
+            if self._transaction_root(txs) != block["transaction_root"]:
+                raise ChainStoreError(f"transaction root mismatch at height {height}")
+            state = transition["state"]
+            if transition["state_root"] != block["resulting_state_root"]:
+                raise ChainStoreError(f"state replay mismatch at height {height}")
+            economics = self._economic_state_after_transactions(economics, txs)
+            if economic_state_root(economics) != block["economic_state_root"]:
+                raise ChainStoreError(f"economic state root mismatch at height {height}")
+            unsigned = {key: block[key] for key in (
+                "chain_id", "height", "previous_block_hash", "timestamp",
+                "transaction_root", "resulting_state_root", "economic_state_root",
+                "proposer_id", "consensus_evidence")}
+            unsigned["transactions"] = [tx.unsigned_dict() for tx in txs]
+            if sha256_hex(unsigned) != block["block_hash"]:
+                raise ChainStoreError(f"block hash mismatch at height {height}")
+            if dict(block["consensus_evidence"] or {}).get("finalized") is not True:
+                raise ChainStoreError(f"block lacks finalization evidence at height {height}")
+            for tx in txs:
+                nonces[tx.sender] = nonces.get(tx.sender, 0) + 1
+                index[tx.tx_hash] = {"height": height, "block_hash": block["block_hash"]}
             previous_hash = block["block_hash"]
-            checked += 1
-
-        if previous_hash != head["block_hash"]:
-            raise ChainStoreError("finalized head hash mismatch")
-
-        return {
-            "verified": True,
-            "height": int(head["height"]),
-            "block_hash": head["block_hash"],
-            "state_root": head["state_root"],
-            "blocks_checked": checked,
-        }
+        head = {"height": len(files) - 1, "block_hash": previous_hash,
+                "state_root": state_root(state),
+                "economic_state_root": economic_state_root(economics)}
+        return state, head, index
 
     def _load_block(self, height: int) -> dict[str, Any]:
         matches = sorted(self.blocks_dir.glob(f"{height:020d}-*.json"))
@@ -583,17 +470,22 @@ class MainnetChainStore:
     @staticmethod
     def _atomic_write_json(path: Path, value: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(
-                value,
-                handle,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-            )
-            handle.flush()
-            os.fsync(handle.fileno())
-
-        os.replace(temporary, path)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=path.name + ".", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                json.dump(value, handle, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)

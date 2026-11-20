@@ -18,6 +18,7 @@ from .genesis_economic_state import (
     validate_genesis_economic_state,
 )
 from .state_transition import BalanceState, state_root
+from .issuance_policy import policy_from_authority_config
 from .transaction import canonical_json, sha256_hex
 
 
@@ -193,6 +194,7 @@ def build_genesis(
 
     _validate_timestamp(genesis_timestamp)
 
+    policy_from_authority_config(authority_config)
     validator_config = _normalize_validators(validators)
     state = deepcopy(initial_state)
 
@@ -247,6 +249,7 @@ def build_genesis(
 
 
 def verify_genesis(genesis: MainnetGenesis) -> None:
+    policy_from_authority_config(genesis.authority_config)
     _validate_timestamp(genesis.genesis_timestamp)
     _normalize_validators(genesis.validator_config)
 
