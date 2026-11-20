@@ -54,3 +54,35 @@ DISABLED_PRN_ISSUANCE_POLICY = PRNIssuancePolicy(
     authorized_issuers=frozenset(),
     max_supply=Decimal("1"),
 )
+
+
+def policy_from_authority_config(config: dict) -> PRNIssuancePolicy | None:
+    """Use only the policy committed in genesis; missing policy disables minting.
+
+    This parses approved configuration; it does not select issuers or a cap.
+    """
+    if "prn_issuance_policy" not in config:
+        return None
+    data = config["prn_issuance_policy"]
+    if not isinstance(data, dict) or set(data) != {"authorized_issuers", "max_supply"}:
+        raise PRNIssuancePolicyError("invalid genesis PRN issuance policy")
+    issuers = data["authorized_issuers"]
+    if (not isinstance(issuers, list) or
+            any(not isinstance(issuer, str) or not issuer for issuer in issuers) or
+            len(issuers) != len(set(issuers))):
+        raise PRNIssuancePolicyError("invalid genesis PRN issuers")
+    cap = data["max_supply"]
+    if not isinstance(cap, str):
+        raise PRNIssuancePolicyError("genesis PRN max_supply must be a decimal string")
+    try:
+        supply = Decimal(cap)
+    except InvalidOperation as exc:
+        raise PRNIssuancePolicyError("invalid genesis PRN max_supply") from exc
+    try:
+        valid = (supply.is_finite() and supply > 0 and
+                 supply == supply.quantize(Decimal("0.00000001")))
+    except InvalidOperation:
+        valid = False
+    if not valid:
+        raise PRNIssuancePolicyError("invalid genesis PRN max_supply")
+    return PRNIssuancePolicy(frozenset(issuers), supply)
