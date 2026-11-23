@@ -25,6 +25,16 @@ class ChainStoreError(ValueError):
     pass
 
 
+def require_verified_network_finality(block: MainnetBlock) -> None:
+    """Fail closed pending verified CometBFT quorum evidence.
+
+    This deliberately has no environment toggle or caller-controlled bypass.
+    Isolated historical fixture tests may replace this function in-process,
+    never the deployed mainnet runtime.
+    """
+    raise ChainStoreError("network_validator_quorum_finality_unavailable")
+
+
 def _serialized_write(method):
     @wraps(method)
     def locked(self, *args, **kwargs):
@@ -150,6 +160,14 @@ class MainnetChainStore:
         *,
         expected_state: Mapping[str, Mapping[str, str]],
     ) -> dict[str, Any]:
+        # Until a CometBFT-backed finality adapter verifies a signed quorum,
+        # an arbitrary consensus_evidence.finalized flag cannot authorize a
+        # live mainnet append. Legacy internal fixtures remain test-only.
+        if (
+            self.chain_id == MAINNET_CHAIN_ID
+            and os.getenv("WHALEZCHAIN_MAINNET_EXECUTION_ENABLED", "").lower() == "true"
+        ):
+            require_verified_network_finality(block)
         canonical_state, canonical_head, canonical_index = self._scan_canonical()
         head = self.finalized_head()
         tx_index = self._read_json(self.tx_index_path)
