@@ -50,3 +50,24 @@ def test_snapshot_cannot_read_under_active_exclusive_commit_lock(tmp_path):
                 assert future.result(timeout=4)["height"] == -1
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+
+def test_historical_snapshot_requires_an_existing_signed_block(tmp_path):
+    import pytest
+    from whalezchain_orchestrator.mainnet.chain_store import ChainStoreError
+
+    store = MainnetChainStore(tmp_path / "isolated-historical")
+    store.initialize_genesis(_genesis())
+    latest = store.verified_snapshot()
+    old = store.verified_snapshot_at(-1)
+    assert old["state"] == latest["state"]
+    assert old["height"] == -1
+    assert old["latest_canonical_height"] == -1
+    assert old["blocks_checked"] == 0
+    with pytest.raises(ChainStoreError, match="exceeds"):
+        store.verified_snapshot_at(0)
+    with pytest.raises(ChainStoreError, match="invalid"):
+        store.verified_snapshot_at(True)
+    with pytest.raises(ChainStoreError, match="invalid"):
+        store.verified_snapshot_at(-2)

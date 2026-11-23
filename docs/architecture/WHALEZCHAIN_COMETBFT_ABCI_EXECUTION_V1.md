@@ -42,6 +42,16 @@ The canonical `MainnetChainStore.verified_snapshot()` provides a shared-lock, re
 
 The full four-node acceptance script now exports the signed header proof before shutdown; a **separate** offline verification step runs after all CometBFT validators have stopped. CI runs the same boundary and rejects any missing, forged or replayed proof. The generated proof, runtime keys and private audit receipts never enter Git.
 
+## Canonical wallet read boundary (cross-service, implemented)
+
+The control-plane `wallet.query` runtime no longer needs an invented balance or a second ledger. The WhalezChain internal read service owns all canonical state reads through `MainnetChainStore.verified_snapshot()`; the independent control runtime uses a local owner-only UNIX socket (0600) to request balances. It does not copy state, sign user transactions, mint assets or maintain a competing wallet database.
+
+A request is admitted only when its **short-lived Ed25519 wallet-owner signature** verifies against the same public key from which `account_id` is derived. The signing payload is domain-separated, network-scoped, nonce-bearing, and binds the requested address. A forged account, expired signature, tampering, and unrecognized operation fields are denied. No user-supplied `approved` or `role` field grants read or write authority. The socket is local only; no public wallet endpoint is created.
+
+**Scope restriction:** this adapter only reads a **synthetic test genesis** and forcibly rejects enabled financial mainnet mode. Without an independently pinned proof, it reports a replay-verified latest balance with `independent_consensus_finality_verified=false`. With an operator-provisioned trusted CometBFT genesis, saved signed header and official offline verifier, the reader replays the exact WhalezChain checkpoint at **Comet height H → Whalez block H−2**, verifies the signed voting quorum and state/economic roots, and returns only that certified historical balance with `independent_consensus_finality_verified=true`. If any trusted proof fails, the read fails closed rather than falling back to a newer uncertified head. The response distinguishes `canonical_height` (certified) from `latest_canonical_height` (possibly newer). No production wallet balance, payment, mint or transfer is thereby authorized.
+
+The two-service acceptance used an existing **real CometBFT-executed synthetic transfer**: the chain read returned Alice's 9 PTN and Bob's 1 PTN, the control engine accepted only signed owner queries, and cross-owner access and `wallet.transfer` requests were denied. A private read receipt and exact source revisions are kept outside Git.
+
 ## Reproducibility and release hold
 
 Source dependency: `github.com/cometbft/cometbft v0.40.0` with `go.mod` and `go.sum` pinned in the existing orchestrator repository. The unmodified upstream source embeds a fallback `TMCoreSemVer` constant `0.39.0`, so the locally compiled executable prints `0.39.0` even when built from the v0.40.0 module path. Production binary provenance must be independently reconciled (verified tag/commit, hashes, SBOM and supported release status).

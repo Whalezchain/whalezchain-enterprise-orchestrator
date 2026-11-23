@@ -323,14 +323,48 @@ class MainnetChainStore:
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    def verified_snapshot_at(self, height: int) -> dict[str, Any]:
+        """Return exact-height canonical state under one consistent read lock.
+
+        Replay and verify the *whole* chain before a historical checkpoint
+        snapshot. Never relabel a later head as finalized by an older quorum
+        proof; all balance values are derived from signed canonical transfers.
+        """
+        if type(height) is not int or height < -1:
+            raise ChainStoreError("invalid historical snapshot height")
+        with (self.root / ".write.lock").open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
+            try:
+                _, latest, index = self._scan_canonical()
+                self._verify_metadata(latest, index)
+                if height > latest["height"]:
+                    raise ChainStoreError("requested snapshot height exceeds canonical head")
+                state, checkpoint, checkpoint_index = self._scan_canonical(
+                    through_height=height
+                )
+                return {
+                    "verified": True,
+                    **checkpoint,
+                    "latest_canonical_height": latest["height"],
+                    "blocks_checked": latest["height"] + 1,
+                    "state": {key: dict(value) for key, value in state.items()},
+                    "transactions_indexed": len(checkpoint_index),
+                }
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
     def _verify_metadata(self, head: dict[str, Any], index: dict[str, Any]) -> None:
         if self.finalized_head() != head:
             raise ChainStoreError("finalized head mismatch with canonical replay")
         if self._read_json(self.tx_index_path) != index:
             raise ChainStoreError("transaction index mismatch with canonical replay")
 
-    def _scan_canonical(self):
-        """Read-only validation independent of head/index availability."""
+    def _scan_canonical(self, through_height: int | None = None):
+        """Read-only validation independent of head/index availability.
+
+        Optional historical replay is only used after a complete canonical
+        replay and metadata check under the shared writer/read lock.
+        """
         genesis = self.load_genesis()
         state = {account: dict(balances)
                  for account, balances in genesis["initial_state"].items()}
@@ -340,6 +374,14 @@ class MainnetChainStore:
         previous_hash = ""
         nonces: dict[str, int] = {}
         files = sorted(self.blocks_dir.glob("*.json"))
+        if through_height is not None:
+            if (
+                type(through_height) is not int
+                or through_height < -1
+                or through_height >= len(files)
+            ):
+                raise ChainStoreError("requested checkpoint outside canonical chain")
+            files = files[:through_height + 1]
         for height, path in enumerate(files):
             if not re.fullmatch(r"[0-9]{20}-[0-9a-f]{64}\.json", path.name):
                 raise ChainStoreError("invalid canonical block filename")

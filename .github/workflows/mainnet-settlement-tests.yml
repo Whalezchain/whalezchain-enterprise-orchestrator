@@ -69,3 +69,16 @@ jobs:
             --proof "$RUNNER_TEMP/whalezchain-e2e/signed-commit-evidence.json" \
             --output "$RUNNER_TEMP/whalezchain-e2e/offline-proof-receipt.json"
           sha256sum "$RUNNER_TEMP/whalezchain-e2e/offline-proof-receipt.json"
+      - name: Certified owner-signed wallet read against exact CometBFT state
+        env:
+          WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          COMET_HEIGHT="$(python -c 'import json,os;from pathlib import Path;p=Path(os.environ["RUNNER_TEMP"])/"whalezchain-e2e"/"e2e-receipt.json";print(json.loads(p.read_text())["results"]["portable_signed_commit_proof"]["height"])')"
+          timeout 50s python -m whalezchain_orchestrator.consensus.wallet_read_acceptance \
+            --network "$RUNNER_TEMP/whalezchain-devnet" \
+            --verifier /tmp/whalezchain-verify-commit \
+            --proof "$RUNNER_TEMP/whalezchain-e2e/signed-commit-evidence.json" \
+            --height "$COMET_HEIGHT" \
+            --output "$RUNNER_TEMP/whalezchain-e2e/certified-wallet-receipt.json"
+          sha256sum "$RUNNER_TEMP/whalezchain-e2e/certified-wallet-receipt.json"

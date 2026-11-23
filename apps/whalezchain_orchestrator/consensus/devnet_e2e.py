@@ -235,10 +235,24 @@ def run(
             raise RuntimeError("signed transfer not recovered on all four validators")
         report["results"]["signed_transfer_replay"] = "PASS"
 
-        # Query real CometBFT signed commits, not a fabricated Python Boolean.
+        # A signed CometBFT header H authenticates WhalezChain height H-2.
+        # Never certify a wallet balance using a proof predating the signed
+        # synthetic transfer, even when the live latest state is correct.
+        source_store = MainnetChainStore(network / "node0" / "whalez-state")
+        tx_index = source_store._read_json(source_store.tx_index_path)
+        if tx.tx_hash not in tx_index:
+            raise RuntimeError("signed transfer not in canonical index")
+        inclusion_whalez_height = int(tx_index[tx.tx_hash]["height"])
+        required_signed_header = inclusion_whalez_height + 2
         height = min(_height(i) for i in range(4)) - 1
-        if height < 2:
-            raise RuntimeError("insufficient signed commit history")
+        if height < required_signed_header:
+            _await_height(
+                [0, 1, 2, 3], minimum=required_signed_header + 1,
+                timeout=45,
+            )
+            height = min(_height(i) for i in range(4)) - 1
+        if height < max(2, required_signed_header):
+            raise RuntimeError("signed proof height predates transfer inclusion")
         commit = _rpc(26657, f"commit?height={height}")
         signatures = commit["signed_header"]["commit"]["signatures"]
         non_absent = sum(
