@@ -28,7 +28,7 @@ The scripts generate four temporary CometBFT validators, four separate WhalezCha
 
 ## Verified engineering acceptance
 
-Local integration demonstrated real four-validator CometBFT block production, signed synthetic PTN transfer, identical canonical block hashes at equal heights, deterministic replay, independent cryptographic verification of four-validator and three-validator commits, rejection of a forged expected application hash, continued 3-of-4 block production after validator shutdown, and rejoin/catch-up from the stopped node's own data.
+Local integration demonstrated real four-validator CometBFT block production, signed synthetic PTN transfer, identical canonical block hashes at equal heights, deterministic replay, independent cryptographic verification of four-validator and three-validator commits, rejection of a forged expected application hash, continued 3-of-4 block production after a validator shutdown, and rejoin/catch-up from the stopped node's own data. An additional same-device negative quorum experiment stopped two validators, observed no finalized-height advancement at 2-of-4, then restarted the original validators and verified resumed consensus with matching canonical blocks. This is not a separate-host network-partition test.
 
 These tests do **not** establish four independently operated hosts, production key custody, independent networking, disaster recovery, adversarial network partition safety, production governance ratification or external financial settlement certification.
 

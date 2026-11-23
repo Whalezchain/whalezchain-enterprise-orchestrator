@@ -295,6 +295,57 @@ def run(
             "height": common_recovery_height,
             "common_block_hash": next(iter(recovery_hashes)),
         }
+
+        # Quorum-loss negative control: when only 2 of 4 validators remain,
+        # no new finalized block is possible. This is a real stop/start
+        # experiment, not an artificial vote-count stub or network partition.
+        for victim in (children[10][0], children[-1][0]):
+            if victim.poll() is not None:
+                raise RuntimeError("validator died before quorum-loss experiment")
+            os.killpg(victim.pid, signal.SIGTERM)
+            victim.wait(timeout=6)
+        time.sleep(2.5)  # Allow any already-decided block to commit first.
+        frozen = {i: _height(i) for i in (0, 1)}
+        time.sleep(7)
+        later = {i: _height(i) for i in (0, 1)}
+        if later != frozen:
+            raise RuntimeError(
+                "consensus finalized without sufficient voting power"
+            )
+        report["results"]["two_of_four_quorum_loss_stalls_finality"] = {
+            "before": frozen,
+            "after": later,
+            "verified": True,
+        }
+
+        # Restore the SAME validator data directories, not new identities.
+        for index in (2, 3):
+            _start([
+                str(comet), "--home", str(network / f"node{index}"),
+                "--log_level", "error", "start",
+            ], env, out / f"comet-node{index}-quorum-restored.log", children)
+        target = min(frozen.values()) + 2
+        restored_heights = _await_height(
+            [0, 1, 2, 3], minimum=target, timeout=55
+        )
+        common_restored_height = min(
+            int(_heads(network)[index]["height"]) for index in range(4)
+        )
+        restored_blocks = {
+            MainnetChainStore(
+                network / f"node{i}" / "whalez-state"
+            )._load_block(common_restored_height)["block_hash"]
+            for i in range(4)
+        }
+        if len(restored_blocks) != 1:
+            raise RuntimeError(
+                "validator stores diverged after quorum restoration"
+            )
+        report["results"]["quorum_restoration_resumes_finality"] = {
+            "heights": restored_heights,
+            "common_whalez_height": common_restored_height,
+            "common_block_hash": next(iter(restored_blocks)),
+        }
         report["result"] = "PASS_INTERNAL_DEVNET"
         return report
     except BaseException as exc:
