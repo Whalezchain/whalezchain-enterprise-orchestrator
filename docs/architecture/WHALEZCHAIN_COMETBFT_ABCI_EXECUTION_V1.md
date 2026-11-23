@@ -52,6 +52,14 @@ A request is admitted only when its **short-lived Ed25519 wallet-owner signature
 
 The two-service acceptance used an existing **real CometBFT-executed synthetic transfer**: the chain read returned Alice's 9 PTN and Bob's 1 PTN, the control engine accepted only signed owner queries, and cross-owner access and `wallet.transfer` requests were denied. A private read receipt and exact source revisions are kept outside Git.
 
+## Cryptographically authenticated synthetic transaction inclusion (private outbox)
+
+The canonical provider module `consensus/signed_tx_inclusion.py` checks a **specific signed transaction hash**, not merely a balance change or success-shaped RPC response. It replay-verifies the canonical WhalezChain store under the existing immutable chain rules, locates exactly one instance of the authentic signed transaction in a block at or before Comet signed-header H−2, checks the trusted Comet genesis belongs to that WhalezChain genesis, and uses the separate official Go cryptographic verifier to validate the H header's voting quorum against the exact application hash.
+
+The result binds transaction hash, inclusion block hash/height, certified state/economic roots, validator vote count, proof SHA-256 and a deterministic receipt digest. It rejects missing/replayed transactions, forged headers, invalid heights, incorrect genesis, wrong application state, insufficient quorum and enabled financial mainnet mode. There is **no mutation or financial release** in this provider. Its output is an internal *synthetic consensus-inclusion attestation*, not a treasury payment or independent production-network certification.
+
+This is the verification dependency consumed by the private control service's existing approval-nonce/outbox reconciliation: the control outbox may transition from `PREPARED_UNSENT` to `CERTIFIED_INTERNAL_DEVNET` only after this genuine inclusion proof is independently generated and checked. It does not expose a public financial route or minting capability. A real same-device cross-repository acceptance drove the exact immutable signed transaction bytes recovered from the durable control outbox into the four-validator CometBFT network, replay-verified each of the four WhalezChain stores, exported signed quorum evidence, stopped the validator processes, verified the proof offline and durably reconciled the originating approval/outbox after restart. All generated test keys, process logs and evidence remain private.
+
 ## Reproducibility and release hold
 
 Source dependency: `github.com/cometbft/cometbft v0.40.0` with `go.mod` and `go.sum` pinned in the existing orchestrator repository. The unmodified upstream source embeds a fallback `TMCoreSemVer` constant `0.39.0`, so the locally compiled executable prints `0.39.0` even when built from the v0.40.0 module path. Production binary provenance must be independently reconciled (verified tag/commit, hashes, SBOM and supported release status).

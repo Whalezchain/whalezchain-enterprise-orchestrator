@@ -20,11 +20,16 @@ from whalezchain_orchestrator.mainnet.chain_store import MainnetChainStore
 from whalezchain_orchestrator.mainnet.private_wallet_read import (
     SCHEMA, SIGNING_DOMAIN, TrustedFinalityCheckpoint,
 )
+from whalezchain_orchestrator.consensus.signed_tx_inclusion import (
+    verify_signed_transaction_inclusion,
+)
 from whalezchain_orchestrator.mainnet.private_wallet_server import (
     PrivateWalletUnixServer,
 )
 from whalezchain_orchestrator.mainnet.transaction import canonical_json
-from whalezchain_orchestrator.tests.mainnet_test_helpers import account, private_key
+from whalezchain_orchestrator.tests.mainnet_test_helpers import (
+    account, private_key, signed_mainnet_transaction,
+)
 
 
 class PrivateUnixHTTP(http.client.HTTPConnection):
@@ -125,6 +130,24 @@ def run(network: Path, verifier: Path, proof: Path, height: int, out: Path) -> d
         endpoint.unlink(missing_ok=True)
         base.rmdir()
 
+    signed_transfer = signed_mainnet_transaction(
+        tx_id="devnet-cometbft-transfer-20261123",
+        sender_label="alice", recipient_label="bob",
+        asset_symbol="PTN", amount="1.00000000", nonce=0,
+        ordering_key="00000000000000000001",
+    )
+    verified_transfer = verify_signed_transaction_inclusion(
+        network=network, verifier_binary=verifier,
+        signed_header_proof=proof, signed_header_height=height,
+        signed_tx_sha256=signed_transfer.tx_hash,
+    )
+    if not (
+        verified_transfer["status"] == "VERIFIED_SYNTHETIC_CHAIN_INCLUSION"
+        and verified_transfer["signed_validator_votes"] >= 3
+        and verified_transfer["whalez_inclusion_height"] <= height - 2
+        and verified_transfer["signed_tx_sha256"] == signed_transfer.tx_hash
+    ):
+        raise RuntimeError("signed transaction inclusion was not authenticated")
     receipt = {
         "schema": "whalezchain.internal.certified_wallet_acceptance.v1",
         "result": "PASS_SYNTHETIC_OWNER_SIGNED_WALLET_FINALITY",
@@ -135,6 +158,7 @@ def run(network: Path, verifier: Path, proof: Path, height: int, out: Path) -> d
         "forged_account_query_rejected": True,
         "canonical_state_unchanged": True,
         "independent_signed_quorum_verified": True,
+        "authentic_signed_transfer_inclusion_sha256": signed_transfer.tx_hash,
         "synthetic_only": True,
         "real_financial_operations": False,
         "external_networks_used": False,
