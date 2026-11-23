@@ -36,3 +36,23 @@ jobs:
           go vet ./...
           CGO_ENABLED=0 go build -trimpath -o /tmp/whalezchain-abci .
           CGO_ENABLED=0 go build -trimpath -o /tmp/whalezchain-verify-commit ./cmd/verify_commit
+      - name: Real four-validator CometBFT quorum and recovery acceptance
+        env:
+          WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          cd apps/whalezchain_orchestrator/consensus/cometbft_abci
+          go mod download github.com/cometbft/cometbft@v0.40.0
+          CGO_ENABLED=0 go -C "$(go env GOMODCACHE)/github.com/cometbft/cometbft@v0.40.0" build -trimpath -o "$RUNNER_TEMP/whalezchain-cometbft" ./cmd/cometbft
+          cd "$GITHUB_WORKSPACE"
+          python -m whalezchain_orchestrator.consensus.devnet_bootstrap \
+            --comet-binary "$RUNNER_TEMP/whalezchain-cometbft" \
+            --output "$RUNNER_TEMP/whalezchain-devnet"
+          timeout 180s python -m whalezchain_orchestrator.consensus.devnet_e2e \
+            --network "$RUNNER_TEMP/whalezchain-devnet" \
+            --comet "$RUNNER_TEMP/whalezchain-cometbft" \
+            --bridge /tmp/whalezchain-abci \
+            --verifier /tmp/whalezchain-verify-commit \
+            --output "$RUNNER_TEMP/whalezchain-e2e"
+          python -m json.tool "$RUNNER_TEMP/whalezchain-e2e/e2e-receipt.json" >/dev/null
+          sha256sum "$RUNNER_TEMP/whalezchain-e2e/e2e-receipt.json"
