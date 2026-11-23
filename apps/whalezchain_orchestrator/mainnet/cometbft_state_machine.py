@@ -114,8 +114,7 @@ class WhalezCometApplication:
 
     def _current_head(self) -> dict[str, Any]:
         self._assert_devnet()
-        self.store.verify_chain()
-        return self.store.finalized_head()
+        return self.store.verified_snapshot()
 
     def info(self) -> dict[str, Any]:
         head = self._current_head()
@@ -147,7 +146,7 @@ class WhalezCometApplication:
         if len(raws) > MAX_BLOCK_TRANSACTIONS:
             raise CometABCIError("block transaction count exceeds limit")
         head = self._current_head()
-        start = self.store.replay_state()
+        start = head["state"]
         txs = tuple(_decode_transaction(raw, self.store.chain_id) for raw in raws)
         index = self.store._read_json(self.store.tx_index_path)
         policy = policy_from_authority_config(self.store.load_genesis()["authority_config"])

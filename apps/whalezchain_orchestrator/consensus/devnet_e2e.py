@@ -7,6 +7,7 @@ external networks. Every child process is terminated before return.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -89,8 +90,8 @@ def _heads(network: Path) -> dict[int, dict]:
     result = {}
     for i in range(4):
         store = MainnetChainStore(network / f"node{i}" / "whalez-state")
-        verified = store.verify_chain()
-        state = store.replay_state()
+        verified = store.verified_snapshot()
+        state = verified["state"]
         result[i] = {
             "height": int(verified["height"]),
             "block_hash": str(verified["block_hash"]),
@@ -103,7 +104,7 @@ def _heads(network: Path) -> dict[int, dict]:
 
 def _verify_signed_commit(
     network: Path, verifier: Path, height: int,
-    *, tamper_app_hash: bool = False,
+    *, tamper_app_hash: bool = False, proof_out: Path | None = None,
 ) -> dict:
     if height < 2:
         raise RuntimeError("commit verification requires at least height 2")
@@ -115,13 +116,18 @@ def _verify_signed_commit(
     )
     if tamper_app_hash:
         expected = "00" * 32
-    result = subprocess.run([
+    cmd = [
         str(verifier),
         "--rpc", "http://127.0.0.1:26657",
         "--genesis", str(network / "node0" / "config" / "genesis.json"),
         "--height", str(height),
         "--expected-apphash", expected,
-    ], capture_output=True, text=True, timeout=20)
+    ]
+    if proof_out is not None:
+        cmd.extend(("--proof-out", str(proof_out)))
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=20,
+    )
     if tamper_app_hash:
         return {"tampered_expected_hash_rejected": result.returncode != 0}
     if result.returncode != 0:
@@ -246,9 +252,20 @@ def run(
         }
         if non_absent < 3:
             raise RuntimeError("expected at least three validator commit signatures")
+        proof_path = out / "signed-commit-evidence.json"
         report["results"]["independent_crypto_commit_proof"] = (
-            _verify_signed_commit(network, verifier, height)
+            _verify_signed_commit(
+                network, verifier, height, proof_out=proof_path,
+            )
         )
+        if not proof_path.is_file():
+            raise RuntimeError("no durable signed-header proof was exported")
+        report["results"]["portable_signed_commit_proof"] = {
+            "height": height,
+            "signed_header_sha256": hashlib.sha256(
+                proof_path.read_bytes()
+            ).hexdigest(),
+        }
         tampered = _verify_signed_commit(
             network, verifier, height, tamper_app_hash=True
         )

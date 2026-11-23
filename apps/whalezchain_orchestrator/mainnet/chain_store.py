@@ -299,6 +299,30 @@ class MainnetChainStore:
         self._verify_metadata(head, index)
         return {"verified": True, **head, "blocks_checked": head["height"] + 1}
 
+    def verified_snapshot(self) -> dict[str, Any]:
+        """Return a consistent canonical chain and balances while commits run.
+
+        The same on-disk lock used by initialize_genesis/append/reconcile is
+        held in shared mode through canonical replay and head/index checks.
+        Readers therefore cannot observe the interval between a new block
+        file and the derived head/index atomic replacements. Callers obtain
+        immutable, detached Python values, not paths to mutable metadata.
+        """
+        with (self.root / ".write.lock").open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
+            try:
+                state, head, index = self._scan_canonical()
+                self._verify_metadata(head, index)
+                return {
+                    "verified": True,
+                    **head,
+                    "blocks_checked": head["height"] + 1,
+                    "state": {key: dict(value) for key, value in state.items()},
+                    "transactions_indexed": len(index),
+                }
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
     def _verify_metadata(self, head: dict[str, Any], index: dict[str, Any]) -> None:
         if self.finalized_head() != head:
             raise ChainStoreError("finalized head mismatch with canonical replay")

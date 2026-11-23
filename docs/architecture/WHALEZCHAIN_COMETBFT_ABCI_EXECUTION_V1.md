@@ -32,6 +32,16 @@ Local integration demonstrated real four-validator CometBFT block production, si
 
 These tests do **not** establish four independently operated hosts, production key custody, independent networking, disaster recovery, adversarial network partition safety, production governance ratification or external financial settlement certification.
 
+## Offline signed-finality evidence and consistent reader boundary
+
+The independent Go verifier supports two distinct modes: `--rpc --proof-out` verifies a live canonical signed header, checks the trusted genesis validator powers and WhalezChain application hash, and writes a bounded 0600 signed-header proof without overwriting existing evidence. `--proof-in` requires no RPC connection and re-runs CometBFT's actual cryptographic signature and quorum checks against **separately supplied** trusted genesis and expected WhalezChain state hash. A raw `verified: true` response is never itself an authorization.
+
+The important height contract is explicit: CometBFT signed header height H proves the **preceding application hash**, which commits WhalezChain block height H-2 in the current genesis mapping; it does not itself certify the current H block. A separate, private, 0600 `offline-proof-receipt.json` records the verified height, roots, signed votes, trusted genesis digest and proof digest, with fail-closed wrong-height, wrong-state and forged-header controls. The receipt is created with exclusive no-overwrite semantics, fsynced to disk. It is not a Founder financial authorization, production finality release or an external certification.
+
+The canonical `MainnetChainStore.verified_snapshot()` provides a shared-lock, replay-verified, detached read for wallets, chain inspection and audit consumers. It cannot observe half-committed head/index metadata while `append_finalized_block` holds the exclusive writer lock. Consumers should use it rather than combining independently timed `replay_state()` and `verify_chain()` calls.
+
+The full four-node acceptance script now exports the signed header proof before shutdown; a **separate** offline verification step runs after all CometBFT validators have stopped. CI runs the same boundary and rejects any missing, forged or replayed proof. The generated proof, runtime keys and private audit receipts never enter Git.
+
 ## Reproducibility and release hold
 
 Source dependency: `github.com/cometbft/cometbft v0.40.0` with `go.mod` and `go.sum` pinned in the existing orchestrator repository. The unmodified upstream source embeds a fallback `TMCoreSemVer` constant `0.39.0`, so the locally compiled executable prints `0.39.0` even when built from the v0.40.0 module path. Production binary provenance must be independently reconciled (verified tag/commit, hashes, SBOM and supported release status).
