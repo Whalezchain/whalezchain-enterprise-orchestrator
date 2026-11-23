@@ -73,12 +73,12 @@ def test_founder_unlock_respects_alpha():
 
     state = founder_external_unlock(
         state,
-        amount="200",
+        amount="100",
         founder_access_ratio="0.50",
     )
 
-    assert state["founder"]["allocation_ptn"] == "200.00000000"
-    assert state["founder"]["external_ptn"] == "200.00000000"
+    assert state["founder"]["allocation_ptn"] == "300.00000000"
+    assert state["founder"]["external_ptn"] == "100.00000000"
 
 
 def test_founder_unlock_rejects_alpha_violation():
@@ -94,7 +94,7 @@ def test_founder_unlock_rejects_alpha_violation():
     with pytest.raises(GenesisEconomicStateError):
         founder_external_unlock(
             state,
-            amount="201",
+            amount="200",
             founder_access_ratio="0.50",
         )
 

@@ -208,7 +208,7 @@ def founder_external_unlock(
 
     try:
         validate_founder_external_unlock(
-            allocation_balance=allocation,
+            allocation_balance=allocation - value,
             external_balance=next_external,
             founder_access_ratio=alpha,
         )

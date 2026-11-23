@@ -1,0 +1,11 @@
+# Python interpreter and test runner outputs (never source code)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Coverage byproducts (generated, not evidence artifacts)
+.coverage
+.coverage.*
+coverage.xml

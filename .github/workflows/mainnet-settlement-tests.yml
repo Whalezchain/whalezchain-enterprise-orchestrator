@@ -19,13 +19,66 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest cryptography fastapi uvicorn httpx2
-      - name: Run settlement and economic tests
+      - name: Install native orchestrator dependencies
         run: |
-          pytest -q \
-            apps/whalezchain_orchestrator/tests/test_external_settlement.py \
-            apps/whalezchain_orchestrator/tests/test_settlement_bond.py \
-            apps/whalezchain_orchestrator/tests/test_http_boundary.py \
-            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_economic_root.py \
-            apps/whalezchain_orchestrator/tests/test_mainnet_chain_store_persistence.py
+          python -m pip install --upgrade pip
+          python -m pip install -r apps/whalezchain_orchestrator/requirements.txt pytest httpx
+      - name: Run complete native orchestrator regression suite
+        run: python -m pytest -q apps/whalezchain_orchestrator/tests
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/whalezchain_orchestrator/consensus/cometbft_abci/go.mod
+          cache-dependency-path: apps/whalezchain_orchestrator/consensus/cometbft_abci/go.sum
+      - name: Verify native CometBFT ABCI++ and signed-commit verifier
+        working-directory: apps/whalezchain_orchestrator/consensus/cometbft_abci
+        run: |
+          go test ./...
+          go vet ./...
+          CGO_ENABLED=0 go build -trimpath -o /tmp/whalezchain-abci .
+          CGO_ENABLED=0 go build -trimpath -o /tmp/whalezchain-verify-commit ./cmd/verify_commit
+      - name: Real four-validator CometBFT quorum and recovery acceptance
+        env:
+          WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          cd apps/whalezchain_orchestrator/consensus/cometbft_abci
+          go mod download github.com/cometbft/cometbft@v0.40.0
+          CGO_ENABLED=0 go -C "$(go env GOMODCACHE)/github.com/cometbft/cometbft@v0.40.0" build -trimpath -o "$RUNNER_TEMP/whalezchain-cometbft" ./cmd/cometbft
+          cd "$GITHUB_WORKSPACE"
+          python -m whalezchain_orchestrator.consensus.devnet_bootstrap \
+            --comet-binary "$RUNNER_TEMP/whalezchain-cometbft" \
+            --output "$RUNNER_TEMP/whalezchain-devnet"
+          timeout 180s python -m whalezchain_orchestrator.consensus.devnet_e2e \
+            --network "$RUNNER_TEMP/whalezchain-devnet" \
+            --comet "$RUNNER_TEMP/whalezchain-cometbft" \
+            --bridge /tmp/whalezchain-abci \
+            --verifier /tmp/whalezchain-verify-commit \
+            --output "$RUNNER_TEMP/whalezchain-e2e"
+          python -m json.tool "$RUNNER_TEMP/whalezchain-e2e/e2e-receipt.json" >/dev/null
+          sha256sum "$RUNNER_TEMP/whalezchain-e2e/e2e-receipt.json"
+      - name: Offline signed-header proof replay and tamper rejection
+        env:
+          WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          COMET_HEIGHT="$(python -c 'import json,os;from pathlib import Path;p=Path(os.environ["RUNNER_TEMP"])/"whalezchain-e2e"/"e2e-receipt.json";print(json.loads(p.read_text())["results"]["portable_signed_commit_proof"]["height"])')"
+          timeout 30s python -m whalezchain_orchestrator.consensus.offline_proof \
+            --network "$RUNNER_TEMP/whalezchain-devnet" \
+            --verifier /tmp/whalezchain-verify-commit \
+            --height "$COMET_HEIGHT" \
+            --proof "$RUNNER_TEMP/whalezchain-e2e/signed-commit-evidence.json" \
+            --output "$RUNNER_TEMP/whalezchain-e2e/offline-proof-receipt.json"
+          sha256sum "$RUNNER_TEMP/whalezchain-e2e/offline-proof-receipt.json"
+      - name: Certified owner-signed wallet read against exact CometBFT state
+        env:
+          WHALEZCHAIN_MAINNET_EXECUTION_ENABLED: "false"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          COMET_HEIGHT="$(python -c 'import json,os;from pathlib import Path;p=Path(os.environ["RUNNER_TEMP"])/"whalezchain-e2e"/"e2e-receipt.json";print(json.loads(p.read_text())["results"]["portable_signed_commit_proof"]["height"])')"
+          timeout 50s python -m whalezchain_orchestrator.consensus.wallet_read_acceptance \
+            --network "$RUNNER_TEMP/whalezchain-devnet" \
+            --verifier /tmp/whalezchain-verify-commit \
+            --proof "$RUNNER_TEMP/whalezchain-e2e/signed-commit-evidence.json" \
+            --height "$COMET_HEIGHT" \
+            --output "$RUNNER_TEMP/whalezchain-e2e/certified-wallet-receipt.json"
+          sha256sum "$RUNNER_TEMP/whalezchain-e2e/certified-wallet-receipt.json"

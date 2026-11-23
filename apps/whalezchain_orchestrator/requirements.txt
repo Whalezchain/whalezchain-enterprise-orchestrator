@@ -2,4 +2,4 @@ fastapi
 uvicorn
 python-dotenv
 pydantic
-cryptography>=43,<47
+cryptography>=49.0.0,<50
