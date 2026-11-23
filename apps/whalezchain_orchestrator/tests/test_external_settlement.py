@@ -120,6 +120,12 @@ def test_prepare_then_finalize_is_idempotent(
     store = MainnetChainStore(tmp_path / "chain")
     store.initialize_genesis(_genesis())
 
+    # Internal chain-store regression only: simulate a previously certified
+    # atomic release in this isolated fixture. The live gate always denies.
+    monkeypatch.setattr(
+        "whalezchain_orchestrator.mainnet.external_settlement.require_atomic_financial_release",
+        lambda: None,
+    )
     prepared = prepare_external_settlement(_payload())
     assert prepared["status"] == "FINALIZATION_AUTHORIZATION_REQUIRED"
     assert prepared["finalized"] is False
@@ -191,6 +197,11 @@ def test_whz_requirement_commits_native_settlement_attestation(
         },
     }
 
+    # Synthetic state-transition regression, not a real Founder approval.
+    monkeypatch.setattr(
+        "whalezchain_orchestrator.mainnet.external_settlement.require_atomic_financial_release",
+        lambda: None,
+    )
     prepared = prepare_external_settlement(payload)
     assert prepared["block"]["transactions"][0]["transaction_type"] == "settlement_attestation"
     assert prepared["block"]["transactions"][0]["settlement_required_whz"] == "10.00000000"

@@ -16,6 +16,7 @@ from .asset_authority.assets import list_assets
 from .mainnet.external_settlement import (
     ExternalSettlementError,
     prepare_external_settlement,
+    preflight_external_settlement_approval,
     finalize_external_settlement,
 )
 from .mainnet.chain_store import MainnetChainStore, ChainStoreError
@@ -161,6 +162,19 @@ def mainnet_settlement_prepare(
     _require_mainnet_token(x_whalez_chain_token)
     try:
         return prepare_external_settlement(payload)
+    except ExternalSettlementError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/mainnet/settlement/approval-preflight")
+def mainnet_settlement_approval_preflight(
+    payload: dict[str, Any],
+    x_whalez_chain_token: str | None = Header(default=None),
+):
+    # Private, authenticated, NON-EXECUTING approval verification only.
+    _require_mainnet_token(x_whalez_chain_token)
+    try:
+        return preflight_external_settlement_approval(payload)
     except ExternalSettlementError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
